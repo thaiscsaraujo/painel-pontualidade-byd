@@ -140,6 +140,51 @@
   }
   .month-chip button.active{background:var(--teal-700);border-color:var(--teal-700);color:#fff;}
 
+  /* ---- ROUTE MULTI-SELECT FILTER ---- */
+  .route-filter{position:relative;}
+  .route-filter-btn{
+    font-family:var(--body-font);font-size:13px;font-weight:600;
+    border:1px solid var(--line);border-radius:9px;
+    padding:8px 10px;background:var(--teal-050);color:var(--ink-900);
+    cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+    min-width:150px;max-width:220px;
+  }
+  .route-filter-btn span.rf-label-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:left;}
+  .route-filter-btn:hover{border-color:var(--teal-600);}
+  .route-filter-btn .rf-caret{color:var(--ink-500);font-size:11px;}
+  .route-filter-panel{
+    position:absolute;top:calc(100% + 6px);left:0;z-index:20;
+    background:#fff;border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 16px 40px -14px rgba(8,48,47,.35);
+    width:340px;max-width:calc(100vw - 40px);padding:10px;
+  }
+  .route-filter-panel input[type=text]{
+    width:100%;box-sizing:border-box;font-family:var(--body-font);font-size:13px;
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+    background:var(--teal-050);color:var(--ink-900);
+  }
+  .rf-actions{display:flex;gap:8px;margin:8px 0;}
+  .rf-actions button{
+    font-family:var(--body-font);font-size:12px;font-weight:700;
+    border:1px solid var(--line);background:#fff;border-radius:100px;
+    padding:5px 12px;cursor:pointer;color:var(--ink-700);
+  }
+  .rf-actions button:hover{border-color:var(--teal-600);color:var(--teal-700);}
+  .rf-list{max-height:260px;overflow-y:auto;border-top:1px solid var(--line);padding-top:6px;}
+  .rf-item{
+    display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:6px;
+    cursor:pointer;font-size:13px;
+  }
+  .rf-item:hover{background:var(--teal-050);}
+  .rf-item input[type=checkbox]{accent-color:var(--teal-700);width:15px;height:15px;flex-shrink:0;}
+  .rf-item .rf-code{font-weight:700;color:var(--teal-800);white-space:nowrap;}
+  .rf-item .rf-desc{color:var(--ink-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .rf-empty{padding:10px 4px;color:var(--ink-500);font-size:13px;text-align:center;}
+  .rf-count-badge{
+    background:var(--teal-700);color:#fff;border-radius:100px;
+    font-size:10.5px;font-weight:800;padding:1px 6px;flex-shrink:0;
+  }
+
   /* ---- KPI ROW ---- */
   .kpi-row{
     display:grid;grid-template-columns:1.15fr 1fr 1fr 1fr 1fr 1fr;gap:14px;
@@ -348,6 +393,20 @@
     <div class="month-chip" id="monthChips"></div>
     <span class="fb-label" style="margin-left:8px;">Operadora</span>
     <select id="operadoraFilter"><option value="">Todas</option></select>
+    <span class="fb-label" style="margin-left:8px;">Roteiro</span>
+    <div class="route-filter" id="routeFilterWrap">
+      <button type="button" id="routeFilterBtn" class="route-filter-btn">
+        <span class="rf-label-text">Todos os roteiros</span><span class="rf-caret">▾</span>
+      </button>
+      <div class="route-filter-panel" id="routeFilterPanel" style="display:none;">
+        <input type="text" id="routeFilterSearch" placeholder="Buscar roteiro ou destino…">
+        <div class="rf-actions">
+          <button type="button" id="rfSelectAll">Selecionar visíveis</button>
+          <button type="button" id="rfClear">Limpar seleção</button>
+        </div>
+        <div class="rf-list" id="routeFilterList"></div>
+      </div>
+    </div>
     <button class="reset" id="resetFilters">Limpar filtros</button>
   </div>
 
@@ -447,14 +506,14 @@
 </div>
 
 <script>
-// ---------- CARREGAMENTO AO VIVO (Google Sheets CSV público) ----------
-// Fonte: planilha publicada na web (Arquivo > Compartilhar > Publicar na Web),
-// um link CSV por aba, identificado pelo "gid" de cada aba.
-const PUBLISH_ID = '2PACX-1vRHIT_JjUG97j7dvxKVuIBQuMZCvPjL1mZtpmUZEkrdOlC3E_-UFWRgYw1F_sD0-c3L2JnqDsAz2ol2';
+// ---------- CARREGAMENTO AO VIVO (Google Sheets via JSONP — sem bloqueio de CORS) ----------
+// Usa o endpoint gviz da própria planilha (não depende de "Publicar na Web"),
+// via injeção de <script> (JSONP), que não é bloqueada por CORS como fetch() seria.
+const SPREADSHEET_ID = '1cYcSpXc4W-VnZgdOPIy-_HUJl9cx2vFinzMwV6sbNtg';
 const SHEET_TABS = [
-  { name: '1° turno', gid: '1077535657' },
-  { name: 'Adm',       gid: '2061328112' },
-  { name: '2° Turno',  gid: '1784827058' },
+  { name: '1° turno' },
+  { name: 'Adm' },
+  { name: '2° Turno' },
 ];
 
 const STATUS_TEXT_MAP = [
@@ -465,30 +524,6 @@ const STATUS_TEXT_MAP = [
   ['Tolerancia', 'Tolerância'],
   ['Atrasado', 'Atrasado'],
 ];
-
-function parseCSV(text){
-  const rows = [];
-  let row = [];
-  let field = '';
-  let inQuotes = false;
-  for (let i = 0; i < text.length; i++){
-    const c = text[i];
-    if (inQuotes){
-      if (c === '"'){
-        if (text[i+1] === '"'){ field += '"'; i++; }
-        else { inQuotes = false; }
-      } else { field += c; }
-    } else {
-      if (c === '"'){ inQuotes = true; }
-      else if (c === ','){ row.push(field); field = ''; }
-      else if (c === '\r'){ /* skip */ }
-      else if (c === '\n'){ row.push(field); rows.push(row); row = []; field = ''; }
-      else { field += c; }
-    }
-  }
-  if (field.length || row.length){ row.push(field); rows.push(row); }
-  return rows.filter(r => r.length > 1 || (r.length === 1 && r[0] !== ''));
-}
 
 function normalizeStatus(raw){
   if (!raw) return null;
@@ -527,19 +562,61 @@ function findCol(header, ...candidates){
   return -1;
 }
 
+// Busca via JSONP: injeta uma tag <script> que carrega o endpoint do Google
+// e chama uma função global nossa com os dados — não é fetch(), então não
+// existe requisição cross-origin para o navegador bloquear via CORS.
+function jsonpFetchTable(url){
+  return new Promise((resolve, reject) => {
+    const cbName = '__gsCb_' + Math.random().toString(36).slice(2) + Date.now();
+    const script = document.createElement('script');
+    let done = false;
+    const timer = setTimeout(()=>{
+      if (done) return;
+      done = true;
+      cleanup();
+      reject(new Error('Tempo esgotado ao buscar a planilha (mais de 15s sem resposta).'));
+    }, 15000);
+    function cleanup(){
+      clearTimeout(timer);
+      delete window[cbName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+    window[cbName] = (data) => {
+      if (done) return;
+      done = true;
+      cleanup();
+      resolve(data);
+    };
+    script.onerror = () => {
+      if (done) return;
+      done = true;
+      cleanup();
+      reject(new Error('Não foi possível carregar o script de dados (verifique se a planilha está compartilhada como "Qualquer pessoa com o link").'));
+    };
+    const sep = url.indexOf('?') !== -1 ? '&' : '?';
+    script.src = url + sep + 'tqx=out:json;responseHandler:' + cbName;
+    document.head.appendChild(script);
+  });
+}
+
+function cellValue(cell){
+  if (!cell) return '';
+  if (cell.f !== undefined && cell.f !== null) return String(cell.f);
+  if (cell.v === undefined || cell.v === null) return '';
+  return String(cell.v);
+}
+
 async function fetchTabRecords(tab){
   const tabName = tab.name;
-  const url = `https://docs.google.com/spreadsheets/d/e/${PUBLISH_ID}/pub?gid=${tab.gid}&single=true&output=csv&_=${Date.now()}`;
-  const resp = await fetch(url, { cache: 'no-store' });
-  if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ao buscar aba ' + tabName);
-  const text = await resp.text();
-  const rows = parseCSV(text);
-  if (!rows.length) return [];
-
-  // encontra a linha de cabeçalho (pode não ser a primeira, se houver título acima)
-  let headerRowIdx = rows.findIndex(r => r.some(c => (c||'').trim().toUpperCase() === 'DATA'));
-  if (headerRowIdx === -1) headerRowIdx = 0;
-  const header = rows[headerRowIdx];
+  const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?sheet=${encodeURIComponent(tabName)}`;
+  const data = await jsonpFetchTable(url);
+  if (!data || data.status === 'error'){
+    const msg = (data && data.errors && data.errors[0] && data.errors[0].detailed_message) || 'erro desconhecido ao ler a aba';
+    throw new Error('Aba "' + tabName + '": ' + msg);
+  }
+  const table = data.table;
+  if (!table || !table.cols || !table.cols.length) return [];
+  const header = table.cols.map(c => (c.label || '').trim());
 
   const iData = findCol(header, 'DATA');
   const iRoteiro = findCol(header, 'ROTEIRO');
@@ -552,33 +629,41 @@ async function fetchTabRecords(tab){
   const iOperadora = findCol(header, 'OPERADORA');
 
   const out = [];
-  for (let r = headerRowIdx + 1; r < rows.length; r++){
-    const row = rows[r];
-    const dataRaw = iData !== -1 ? row[iData] : null;
-    const roteiroRaw = iRoteiro !== -1 ? row[iRoteiro] : null;
-    if (!dataRaw || !roteiroRaw) continue;
+  (table.rows || []).forEach(row => {
+    const cells = row.c || [];
+    const dataRaw = iData !== -1 ? cellValue(cells[iData]) : null;
+    const roteiroRaw = iRoteiro !== -1 ? cellValue(cells[iRoteiro]) : null;
+    if (!dataRaw || !roteiroRaw) return;
     const dISO = parseDateBR(dataRaw);
-    if (!dISO) continue;
+    if (!dISO) return;
 
     const roteiroFull = roteiroRaw.trim();
     const dashIdx = roteiroFull.indexOf(' - ');
     const code = dashIdx !== -1 ? roteiroFull.slice(0, dashIdx).trim() : roteiroFull;
     const desc = dashIdx !== -1 ? roteiroFull.slice(dashIdx + 3).trim() : '';
 
+    const chegadaVal = iChegada !== -1 ? cellValue(cells[iChegada]) : null;
+    const statusVal = iStatus !== -1 ? cellValue(cells[iStatus]) : null;
+    const motoristaVal = iMotorista !== -1 ? cellValue(cells[iMotorista]).trim() : '';
+    const veiculoVal = iVeiculo !== -1 ? cellValue(cells[iVeiculo]).trim() : '';
+    const carroVal = iCarro !== -1 ? cellValue(cells[iCarro]).trim() : '';
+    const motivoVal = iMotivo !== -1 ? cellValue(cells[iMotivo]).trim() : '';
+    const operadoraVal = iOperadora !== -1 ? cellValue(cells[iOperadora]).trim() : '';
+
     out.push({
       d: dISO,
       c: code,
       ds: desc,
       t: tabName,
-      h: iChegada !== -1 ? parseTimeHM(row[iChegada]) : null,
-      s: iStatus !== -1 ? normalizeStatus(row[iStatus]) : null,
-      m: iMotorista !== -1 && row[iMotorista] && row[iMotorista].trim() ? row[iMotorista].trim() : null,
-      v: iVeiculo !== -1 && row[iVeiculo] && row[iVeiculo].trim() ? row[iVeiculo].trim() : null,
-      car: iCarro !== -1 && row[iCarro] && row[iCarro].trim() ? row[iCarro].trim() : null,
-      mo: iMotivo !== -1 && row[iMotivo] && row[iMotivo].trim() ? row[iMotivo].trim() : null,
-      op: iOperadora !== -1 && row[iOperadora] && row[iOperadora].trim() ? row[iOperadora].trim() : null,
+      h: chegadaVal ? parseTimeHM(chegadaVal) : null,
+      s: statusVal ? normalizeStatus(statusVal) : null,
+      m: motoristaVal || null,
+      v: veiculoVal || null,
+      car: carroVal || null,
+      mo: motivoVal || null,
+      op: operadoraVal || null,
     });
-  }
+  });
   return out;
 }
 
@@ -663,6 +748,9 @@ document.getElementById('resetFilters').addEventListener('click', ()=>{
   document.getElementById('searchBox').value = '';
   document.getElementById('turnoFilter').value = '';
   document.getElementById('operadoraFilter').value = '';
+  selectedRoutes.clear();
+  updateRouteFilterButtonLabel();
+  document.getElementById('routeFilterPanel').style.display = 'none';
   document.getElementById('minFilter').value = '3';
   setActiveMonthChip(null);
   activeKpi = null;
@@ -676,12 +764,83 @@ document.getElementById('resetFilters').addEventListener('click', ()=>{
 let trendChartInstance = null;
 let expandedRoute = null; // key: code+turno
 
+// ---------- ROUTE MULTI-SELECT FILTER ----------
+let selectedRoutes = new Set(); // vazio = todos os roteiros
+let routeOptions = [];
+
+function setupRouteFilter(){
+  const map = new Map();
+  RECORDS.forEach(r=>{ if (!map.has(r.c)) map.set(r.c, r.ds || ''); });
+  routeOptions = [...map.entries()].map(([code,desc])=>({code,desc})).sort((a,b)=>a.code.localeCompare(b.code));
+
+  const wrap = document.getElementById('routeFilterWrap');
+  const btn = document.getElementById('routeFilterBtn');
+  const panel = document.getElementById('routeFilterPanel');
+  const search = document.getElementById('routeFilterSearch');
+
+  renderRouteFilterList('');
+  updateRouteFilterButtonLabel();
+
+  btn.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    const isOpen = panel.style.display !== 'none';
+    panel.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen){ search.value = ''; renderRouteFilterList(''); search.focus(); }
+  });
+  document.addEventListener('click', (e)=>{
+    if (!wrap.contains(e.target)) panel.style.display = 'none';
+  });
+  search.addEventListener('input', ()=> renderRouteFilterList(search.value));
+  document.getElementById('rfSelectAll').addEventListener('click', ()=>{
+    const ft = search.value.toLowerCase();
+    routeOptions.forEach(o=>{
+      if (!ft || (o.code+' '+o.desc).toLowerCase().includes(ft)) selectedRoutes.add(o.code);
+    });
+    renderRouteFilterList(search.value);
+    updateRouteFilterButtonLabel();
+    refreshAll();
+  });
+  document.getElementById('rfClear').addEventListener('click', ()=>{
+    selectedRoutes.clear();
+    renderRouteFilterList(search.value);
+    updateRouteFilterButtonLabel();
+    refreshAll();
+  });
+}
+
+function renderRouteFilterList(filterText){
+  const list = document.getElementById('routeFilterList');
+  const ft = (filterText||'').toLowerCase();
+  const filtered = routeOptions.filter(o => !ft || (o.code+' '+o.desc).toLowerCase().includes(ft));
+  list.innerHTML = filtered.length ? filtered.map(o => `
+    <label class="rf-item">
+      <input type="checkbox" value="${o.code}" ${selectedRoutes.has(o.code)?'checked':''}>
+      <span class="rf-code">${o.code}</span><span class="rf-desc">${o.desc||''}</span>
+    </label>`).join('') : '<div class="rf-empty">Nenhum roteiro encontrado.</div>';
+  list.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      if (cb.checked) selectedRoutes.add(cb.value); else selectedRoutes.delete(cb.value);
+      updateRouteFilterButtonLabel();
+      refreshAll();
+    });
+  });
+}
+
+function updateRouteFilterButtonLabel(){
+  const label = document.querySelector('#routeFilterBtn .rf-label-text');
+  if (selectedRoutes.size === 0) label.textContent = 'Todos os roteiros';
+  else if (selectedRoutes.size === 1) label.textContent = [...selectedRoutes][0];
+  else label.textContent = selectedRoutes.size + ' roteiros selecionados';
+}
+
 function getFilteredRecords(){
   const from = document.getElementById('dateFrom').value || minDate;
   const to = document.getElementById('dateTo').value || maxDate;
   const op = document.getElementById('operadoraFilter').value;
-  return RECORDS.filter(r => r.d >= from && r.d <= to && (!op || r.op === op));
+  return RECORDS.filter(r => r.d >= from && r.d <= to && (!op || r.op === op) && (selectedRoutes.size===0 || selectedRoutes.has(r.c)));
 }
+
+setupRouteFilter();
 
 function refreshAll(){
   const recs = getFilteredRecords();
@@ -1212,7 +1371,7 @@ function showLoadStatus(msg, isError){
     el.id = 'loadStatus';
     el.className = 'load-status';
     const filterbar = document.querySelector('.filterbar');
-    filterbar.parentNode.insertBefore(el, filterbar);
+    filterbar.parentNode.insertBefore(el, filterbar.nextSibling);
   }
   el.textContent = msg;
   el.className = 'load-status' + (isError ? ' load-error' : '');
