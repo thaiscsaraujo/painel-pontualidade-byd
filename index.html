@@ -175,8 +175,9 @@
     position:absolute;top:calc(100% + 6px);left:0;z-index:20;
     background:#fff;border:1px solid var(--line);border-radius:12px;
     box-shadow:0 16px 40px -14px rgba(8,48,47,.35);
-    width:340px;max-width:calc(100vw - 40px);padding:10px;
+    width:260px;max-width:calc(100vw - 40px);padding:10px;
   }
+  .route-filter-panel.wide{width:340px;}
   .route-filter-panel input[type=text]{
     width:100%;box-sizing:border-box;font-family:var(--body-font);font-size:13px;
     border:1px solid var(--line);border-radius:8px;padding:8px 10px;
@@ -191,13 +192,14 @@
   .rf-actions button:hover{border-color:var(--teal-600);color:var(--teal-700);}
   .rf-list{max-height:260px;overflow-y:auto;border-top:1px solid var(--line);padding-top:6px;}
   .rf-item{
-    display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:6px;
+    display:flex;align-items:center;gap:10px;padding:7px 6px;border-radius:6px;
     cursor:pointer;font-size:13px;
   }
   .rf-item:hover{background:var(--teal-050);}
-  .rf-item input[type=checkbox]{accent-color:var(--teal-700);width:15px;height:15px;flex-shrink:0;}
-  .rf-item .rf-code{font-weight:700;color:var(--teal-800);white-space:nowrap;}
-  .rf-item .rf-desc{color:var(--ink-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .rf-item input[type=checkbox]{accent-color:var(--teal-700);width:15px;height:15px;flex-shrink:0;margin:0;}
+  .rf-item .rf-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .rf-item .rf-code{font-weight:700;color:var(--teal-800);}
+  .rf-item .rf-desc{color:var(--ink-500);}
   .rf-empty{padding:10px 4px;color:var(--ink-500);font-size:13px;text-align:center;}
   .rf-count-badge{
     background:var(--teal-700);color:#fff;border-radius:100px;
@@ -435,7 +437,7 @@
       <button type="button" id="routeFilterBtn" class="route-filter-btn">
         <span class="rf-label-text" data-i18n="all_routes">Todos os roteiros</span><span class="rf-caret">▾</span>
       </button>
-      <div class="route-filter-panel" id="routeFilterPanel" style="display:none;">
+      <div class="route-filter-panel wide" id="routeFilterPanel" style="display:none;">
         <input type="text" id="routeFilterSearch" data-i18n-ph="search_route" placeholder="Buscar roteiro ou destino…">
         <div class="rf-actions">
           <button type="button" id="rfSelectAll" data-i18n="select_visible">Selecionar visíveis</button>
@@ -546,6 +548,7 @@ const SHEET_TABS = [
   { name: '1° turno' },
   { name: 'Adm' },
   { name: '2° Turno' },
+  { name: '3° Turno' },
 ];
 
 const STATUS_TEXT_MAP = [
@@ -640,18 +643,32 @@ function cellValue(cell){
 
 async function fetchTabRecords(tab){
   const tabName = tab.name;
-  const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?sheet=${encodeURIComponent(tabName)}`;
+  // headers=0 faz o Google não tentar adivinhar qual linha é o cabeçalho —
+  // pedimos todas as linhas cruas e nós mesmos localizamos o cabeçalho abaixo.
+  // Isso evita quebrar em abas com título mesclado acima do cabeçalho (3° Turno)
+  // ou com a célula de cabeçalho da coluna DATA em branco (2° Turno).
+  const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?sheet=${encodeURIComponent(tabName)}&headers=0`;
   const data = await jsonpFetchTable(url);
   if (!data || data.status === 'error'){
     const msg = (data && data.errors && data.errors[0] && data.errors[0].detailed_message) || 'erro desconhecido ao ler a aba';
     throw new Error('Aba "' + tabName + '": ' + msg);
   }
   const table = data.table;
-  if (!table || !table.cols || !table.cols.length) return [];
-  const header = table.cols.map(c => (c.label || '').trim());
+  if (!table || !table.rows || !table.rows.length) return [];
 
-  const iData = findCol(header, 'DATA');
-  const iRoteiro = findCol(header, 'ROTEIRO');
+  const rawRows = table.rows.map(row => (row.c || []).map(cellValue));
+
+  // localiza a linha de cabeçalho real: a primeira linha que contém "ROTEIRO"
+  // em alguma célula (âncora estável — presente em todas as abas conhecidas,
+  // ao contrário de "DATA", que pode vir em branco em alguma aba).
+  let headerRowIdx = rawRows.findIndex(r => r.some(v => (v||'').trim().toUpperCase() === 'ROTEIRO'));
+  if (headerRowIdx === -1) headerRowIdx = 0;
+  const header = rawRows[headerRowIdx];
+
+  let iData = findCol(header, 'DATA');
+  if (iData === -1) iData = 0; // fallback: DATA é sempre a 1ª coluna, mesmo sem rótulo (caso do 2° Turno)
+  let iRoteiro = findCol(header, 'ROTEIRO');
+  if (iRoteiro === -1) iRoteiro = 1;
   const iChegada = findCol(header, 'CHEGADA BYD');
   const iStatus = findCol(header, 'STATUS');
   const iMotorista = findCol(header, 'MOTORISTA');
@@ -661,26 +678,26 @@ async function fetchTabRecords(tab){
   const iOperadora = findCol(header, 'OPERADORA');
 
   const out = [];
-  (table.rows || []).forEach(row => {
-    const cells = row.c || [];
-    const dataRaw = iData !== -1 ? cellValue(cells[iData]) : null;
-    const roteiroRaw = iRoteiro !== -1 ? cellValue(cells[iRoteiro]) : null;
-    if (!dataRaw || !roteiroRaw) return;
+  for (let r = headerRowIdx + 1; r < rawRows.length; r++){
+    const row = rawRows[r];
+    const dataRaw = row[iData] || null;
+    const roteiroRaw = row[iRoteiro] || null;
+    if (!dataRaw || !roteiroRaw) continue;
     const dISO = parseDateBR(dataRaw);
-    if (!dISO) return;
+    if (!dISO) continue;
 
     const roteiroFull = roteiroRaw.trim();
     const dashIdx = roteiroFull.indexOf(' - ');
     const code = dashIdx !== -1 ? roteiroFull.slice(0, dashIdx).trim() : roteiroFull;
     const desc = dashIdx !== -1 ? roteiroFull.slice(dashIdx + 3).trim() : '';
 
-    const chegadaVal = iChegada !== -1 ? cellValue(cells[iChegada]) : null;
-    const statusVal = iStatus !== -1 ? cellValue(cells[iStatus]) : null;
-    const motoristaVal = iMotorista !== -1 ? cellValue(cells[iMotorista]).trim() : '';
-    const veiculoVal = iVeiculo !== -1 ? cellValue(cells[iVeiculo]).trim() : '';
-    const carroVal = iCarro !== -1 ? cellValue(cells[iCarro]).trim() : '';
-    const motivoVal = iMotivo !== -1 ? cellValue(cells[iMotivo]).trim() : '';
-    const operadoraVal = iOperadora !== -1 ? cellValue(cells[iOperadora]).trim() : '';
+    const chegadaVal = iChegada !== -1 ? row[iChegada] : null;
+    const statusVal = iStatus !== -1 ? row[iStatus] : null;
+    const motoristaVal = iMotorista !== -1 ? (row[iMotorista]||'').trim() : '';
+    const veiculoVal = iVeiculo !== -1 ? (row[iVeiculo]||'').trim() : '';
+    const carroVal = iCarro !== -1 ? (row[iCarro]||'').trim() : '';
+    const motivoVal = iMotivo !== -1 ? (row[iMotivo]||'').trim() : '';
+    const operadoraVal = iOperadora !== -1 ? (row[iOperadora]||'').trim() : '';
 
     out.push({
       d: dISO,
@@ -695,7 +712,7 @@ async function fetchTabRecords(tab){
       mo: motivoVal || null,
       op: operadoraVal || null,
     });
-  });
+  }
   return out;
 }
 
@@ -766,8 +783,8 @@ const STATUS_LABEL = {
   zh: {'Antecipado':'提前', 'No Horário':'准时', 'Tolerância':'容差', 'Atrasado':'延误'}
 };
 const TURNO_LABEL = {
-  pt: {'1° turno':'1° turno', 'Adm':'Adm', '2° Turno':'2° Turno'},
-  zh: {'1° turno':'第一班', 'Adm':'行政班', '2° Turno':'第二班'}
+  pt: {'1° turno':'1° turno', 'Adm':'Adm', '2° Turno':'2° Turno', '3° Turno':'3° Turno'},
+  zh: {'1° turno':'第一班', 'Adm':'行政班', '2° Turno':'第二班', '3° Turno':'第三班'}
 };
 function sT(status){ return status ? (STATUS_LABEL[currentLang][status] || status) : status; }
 function sTu(turno){ return TURNO_LABEL[currentLang][turno] || turno; }
@@ -1034,7 +1051,7 @@ function renderRouteFilterList(filterText){
   list.innerHTML = filtered.length ? filtered.map(o => `
     <label class="rf-item">
       <input type="checkbox" value="${o.code}" ${selectedRoutes.has(o.code)?'checked':''}>
-      <span class="rf-code">${o.code}</span><span class="rf-desc">${o.desc||''}</span>
+      <span class="rf-label"><span class="rf-code">${o.code}</span> <span class="rf-desc">${o.desc||''}</span></span>
     </label>`).join('') : `<div class="rf-empty">${t('no_route_found')}</div>`;
   list.querySelectorAll('input[type=checkbox]').forEach(cb=>{
     cb.addEventListener('change', ()=>{
@@ -1055,7 +1072,7 @@ function updateRouteFilterButtonLabel(){
 // ---------- TURNO MULTI-SELECT FILTER (mesma lógica do filtro de roteiro) ----------
 let selectedTurnos = new Set(); // vazio = todos os turnos
 let turnoOptions = [];
-const TURNO_ORDER = ['1° turno','Adm','2° Turno'];
+const TURNO_ORDER = ['1° turno','Adm','2° Turno','3° Turno'];
 
 function setupTurnoFilter(){
   const set = new Set(RECORDS.map(r=>r.t).filter(Boolean));
@@ -1109,7 +1126,7 @@ function renderTurnoFilterList(filterText){
   list.innerHTML = filtered.length ? filtered.map(tn => `
     <label class="rf-item">
       <input type="checkbox" value="${tn}" ${selectedTurnos.has(tn)?'checked':''}>
-      <span class="rf-code">${sTu(tn)}</span>
+      <span class="rf-label"><span class="rf-code">${sTu(tn)}</span></span>
     </label>`).join('') : `<div class="rf-empty">${t('no_shift_found')}</div>`;
   list.querySelectorAll('input[type=checkbox]').forEach(cb=>{
     cb.addEventListener('change', ()=>{
@@ -1242,7 +1259,7 @@ function renderKpiDetail(kind, recs){
   const withStatus = recs.filter(r=>r.s);
 
   if (kind === 'total'){
-    const turnos = ['1° turno','Adm','2° Turno'];
+    const turnos = ['1° turno','Adm','2° Turno','3° Turno'];
     const rows = turnos.map(tn=>{
       const tr = recs.filter(r=>r.t===tn);
       return `<tr><td><span class="turno-tag">${sTu(tn)}</span></td><td class="num">${tr.length.toLocaleString('pt-BR')}</td><td class="num">${recs.length ? (100*tr.length/recs.length).toFixed(1) : '0.0'}%</td></tr>`;
@@ -1287,7 +1304,7 @@ let detailedTurno = null; // apenas para destacar/abrir o card de detalhe (não 
 function renderTurnoGrid(recs){
  try {
   const turnoBars = document.getElementById('turnoBars');
-  const turnos = ['1° turno','Adm','2° Turno'];
+  const turnos = ['1° turno','Adm','2° Turno','3° Turno'];
   turnoBars.innerHTML = turnos.map(tn=>{
     const tr = recs.filter(r=>r.t===tn);
     const withStatus = tr.filter(r=>r.s);
