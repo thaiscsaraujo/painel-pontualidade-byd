@@ -334,6 +334,19 @@
 
   /* legend row */
   .legend-row{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--ink-700);margin-top:14px;align-items:center;}
+
+  /* ---- MOTIVO DE ATRASO CHART ---- */
+  .motivo-row{display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--line);}
+  .motivo-row:last-child{border-bottom:none;}
+  .motivo-label{
+    flex:0 0 240px;max-width:240px;font-size:13px;color:var(--ink-800);font-weight:600;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .motivo-track{flex:1;height:14px;background:var(--teal-050);border-radius:100px;overflow:hidden;}
+  .motivo-fill{height:100%;border-radius:100px;transition:width .3s;}
+  .motivo-pct{flex:0 0 auto;font-size:13px;font-weight:700;color:var(--ink-900);min-width:90px;text-align:right;}
+  .motivo-count{font-weight:500;color:var(--ink-500);}
+  @media (max-width:640px){ .motivo-label{flex-basis:120px;max-width:120px;} }
   .swatch{display:inline-flex;align-items:center;gap:5px;}
   .swatch i{width:9px;height:9px;border-radius:3px;display:inline-block;}
 
@@ -489,6 +502,19 @@
         <span style="margin-left:auto;color:var(--ink-500);font-style:italic;">Clique em um ponto do gráfico para ver o detalhe do dia</span>
       </div>
       <div id="dayDetailCard" class="day-detail-card" style="display:none;"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <div>
+        <div class="eyebrow" data-i18n="eyebrow_motivo">Diagnóstico</div>
+        <h2 data-i18n="h2_motivo">Motivos de atraso</h2>
+      </div>
+      <div class="section-desc" data-i18n="desc_motivo">Percentual de cada motivo sobre o total de viagens com motivo de atraso informado, dentro do período e filtros selecionados.</div>
+    </div>
+    <div class="panel">
+      <div id="motivoChart"></div>
     </div>
   </section>
 
@@ -838,6 +864,9 @@ const I18N = {
     trip_detail_title: (n,code)=>n+' viagem(ns) do roteiro '+code+' no período',
     delays_suffix: 'atraso(s)', tolerance_suffix: 'em tolerância', no_record_suffix: 'sem registro de chegada',
     no_shift_found: 'Nenhum turno encontrado.', no_route_found: 'Nenhum roteiro encontrado.',
+    eyebrow_motivo: 'Diagnóstico', h2_motivo: 'Motivos de atraso',
+    desc_motivo: 'Percentual de cada motivo sobre o total de viagens com motivo de atraso informado, dentro do período e filtros selecionados.',
+    motivo_empty: 'Nenhuma viagem com motivo de atraso informado no período e filtros selecionados.',
   },
   zh: {
     title: '准点率看板',
@@ -887,6 +916,9 @@ const I18N = {
     trip_detail_title: (n,code)=>'路线 '+code+' 在该期间共 '+n+' 次行程',
     delays_suffix: '次延误', tolerance_suffix: '次容差', no_record_suffix: '次无到达记录',
     no_shift_found: '未找到班次。', no_route_found: '未找到路线。',
+    eyebrow_motivo: '诊断分析', h2_motivo: '延误原因',
+    desc_motivo: '在所选期间及筛选条件下，各延误原因占已填写延误原因行程总数的百分比。',
+    motivo_empty: '所选期间及筛选条件下没有填写延误原因的行程。',
   }
 };
 function t(key){
@@ -1194,7 +1226,36 @@ function refreshAll(){
   renderKPI(recs);
   renderTurnoGrid(recs);
   renderTrend(recs);
+  renderMotivoChart(recs);
   renderRouteTable(recs);
+}
+
+// ---------- MOTIVO DE ATRASO CHART ----------
+const MOTIVO_PALETTE = ['#147370','#5b6fd6','#e3a530','#c8323f','#0b4544','#8a94a3','#1c8f8b','#b5821f','#7d5ba6','#3d8b6f','#c26b3e','#4472ca'];
+function renderMotivoChart(recs){
+ try {
+  const container = document.getElementById('motivoChart');
+  const withMotivo = recs.filter(r => r.mo && r.mo.trim());
+  if (!withMotivo.length){
+    container.innerHTML = `<div class="ddc-empty">${t('motivo_empty')}</div>`;
+    return;
+  }
+  const counts = {};
+  withMotivo.forEach(r=>{
+    const key = r.mo.trim();
+    counts[key] = (counts[key]||0) + 1;
+  });
+  const total = withMotivo.length;
+  const rows = Object.entries(counts)
+    .map(([label,count])=>({label, count, pct: 100*count/total}))
+    .sort((a,b)=> b.count - a.count);
+  container.innerHTML = rows.map((r,i)=>`
+    <div class="motivo-row">
+      <div class="motivo-label" title="${r.label}">${r.label}</div>
+      <div class="motivo-track"><div class="motivo-fill" style="width:${r.pct}%;background:${MOTIVO_PALETTE[i % MOTIVO_PALETTE.length]}"></div></div>
+      <div class="motivo-pct">${r.pct.toFixed(1)}% <span class="motivo-count">(${r.count})</span></div>
+    </div>`).join('');
+ } catch(e) { console.error('Erro ao montar gráfico de motivos:', e); }
 }
 
 // ---------- KPI ROW ----------
