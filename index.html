@@ -577,14 +577,14 @@ const SPREADSHEET_ID = '1cYcSpXc4W-VnZgdOPIy-_HUJl9cx2vFinzMwV6sbNtg';
 // Sem ela, o painel funciona normalmente — só não mostra esse aviso.
 const SHEETS_API_KEY = 'COLE_SUA_CHAVE_DE_API_AQUI';
 const SHEET_TABS = [
-  { name: '1° turno Brasileiro', turno: '1° turno', grupo: 'Brasileiro' },
-  { name: 'Chines 1° turno',      turno: '1° turno', grupo: 'Chinês' },
-  { name: 'Adm Brasileiro',       turno: 'Adm',      grupo: 'Brasileiro' },
-  { name: 'Chines Adm',           turno: 'Adm',      grupo: 'Chinês' },
-  { name: '2° Turno Brasileiro',  turno: '2° Turno', grupo: 'Brasileiro' },
-  { name: 'Chines 2° Turno',      turno: '2° Turno', grupo: 'Chinês' },
-  { name: '3° Turno Brasileiro',  turno: '3° Turno', grupo: 'Brasileiro' },
-  { name: 'Chines 3° Turno',      turno: '3° Turno', grupo: 'Chinês' },
+  { name: '1° turno Brasileiro', turno: '1° turno', grupo: 'Brasileiro', headerRows: 1 },
+  { name: 'Chines 1° turno',      turno: '1° turno', grupo: 'Chinês', headerRows: 1 },
+  { name: 'Adm Brasileiro',       turno: 'Adm',      grupo: 'Brasileiro', headerRows: 1 },
+  { name: 'Chines Adm',           turno: 'Adm',      grupo: 'Chinês', headerRows: 1 },
+  { name: '2° Turno Brasileiro',  turno: '2° Turno', grupo: 'Brasileiro', headerRows: 1 },
+  { name: 'Chines 2° Turno',      turno: '2° Turno', grupo: 'Chinês', headerRows: 1 },
+  { name: '3° Turno Brasileiro',  turno: '3° Turno', grupo: 'Brasileiro', headerRows: 2 },
+  { name: 'Chines 3° Turno',      turno: '3° Turno', grupo: 'Chinês', headerRows: 2 },
 ];
 
 const STATUS_TEXT_MAP = [
@@ -714,30 +714,27 @@ function cellValue(cell){
 
 async function fetchTabRecords(tab){
   const tabName = tab.name;
-  // headers=0 faz o Google não tentar adivinhar qual linha é o cabeçalho —
-  // pedimos todas as linhas cruas e nós mesmos localizamos o cabeçalho abaixo.
-  // Isso evita quebrar em abas com título mesclado acima do cabeçalho (3° Turno)
-  // ou com a célula de cabeçalho da coluna DATA em branco (2° Turno).
-  const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?sheet=${encodeURIComponent(tabName)}&headers=0`;
+  // headers=N diz ao Google exatamente quantas linhas são de cabeçalho, por
+  // aba (normalmente 1; abas com título mesclado acima do cabeçalho real,
+  // como o 3° Turno, usam 2). Isso deixa o Google aplicar sua formatação
+  // automática de tipos por coluna (essencial pra colunas de HORA, como
+  // CHEGADA BYD, aparecerem corretamente) — evitando o problema de usar
+  // headers=0 (que misturava a linha de cabeçalho nos dados e confundia
+  // a detecção de tipo da coluna de horário).
+  const headerRows = tab.headerRows || 1;
+  const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?sheet=${encodeURIComponent(tabName)}&headers=${headerRows}`;
   const data = await jsonpFetchTable(url);
   if (!data || data.status === 'error'){
     const msg = (data && data.errors && data.errors[0] && data.errors[0].detailed_message) || 'erro desconhecido ao ler a aba';
     throw new Error('Aba "' + tabName + '": ' + msg);
   }
   const table = data.table;
-  if (!table || !table.rows || !table.rows.length) return [];
+  if (!table || !table.cols || !table.rows) return [];
 
-  const rawRows = table.rows.map(row => (row.c || []).map(cellValue));
-
-  // localiza a linha de cabeçalho real: a primeira linha que contém "ROTEIRO"
-  // em alguma célula (âncora estável — presente em todas as abas conhecidas,
-  // ao contrário de "DATA", que pode vir em branco em alguma aba).
-  let headerRowIdx = rawRows.findIndex(r => r.some(v => (v||'').trim().toUpperCase() === 'ROTEIRO'));
-  if (headerRowIdx === -1) headerRowIdx = 0;
-  const header = rawRows[headerRowIdx];
+  const header = table.cols.map(c => (c.label || '').trim());
 
   let iData = findCol(header, 'DATA');
-  if (iData === -1) iData = 0; // fallback: DATA é sempre a 1ª coluna, mesmo sem rótulo (caso do 2° Turno)
+  if (iData === -1) iData = 0; // fallback: DATA é sempre a 1ª coluna, mesmo sem rótulo (caso já visto no 2° Turno)
   let iRoteiro = findCol(header, 'ROTEIRO');
   if (iRoteiro === -1) iRoteiro = 1;
   const iChegada = findCol(header, 'CHEGADA BYD');
@@ -749,26 +746,26 @@ async function fetchTabRecords(tab){
   const iOperadora = findCol(header, 'OPERADORA');
 
   const out = [];
-  for (let r = headerRowIdx + 1; r < rawRows.length; r++){
-    const row = rawRows[r];
-    const dataRaw = row[iData] || null;
-    const roteiroRaw = row[iRoteiro] || null;
-    if (!dataRaw || !roteiroRaw) continue;
+  table.rows.forEach(row => {
+    const cells = row.c || [];
+    const dataRaw = iData !== -1 ? cellValue(cells[iData]) : null;
+    const roteiroRaw = iRoteiro !== -1 ? cellValue(cells[iRoteiro]) : null;
+    if (!dataRaw || !roteiroRaw) return;
     const dISO = parseDateBR(dataRaw);
-    if (!dISO) continue;
+    if (!dISO) return;
 
     const roteiroFull = roteiroRaw.trim();
     const dashIdx = roteiroFull.indexOf(' - ');
     const code = dashIdx !== -1 ? roteiroFull.slice(0, dashIdx).trim() : roteiroFull;
     const desc = dashIdx !== -1 ? roteiroFull.slice(dashIdx + 3).trim() : '';
 
-    const chegadaVal = iChegada !== -1 ? row[iChegada] : null;
-    const statusVal = iStatus !== -1 ? row[iStatus] : null;
-    const motoristaVal = iMotorista !== -1 ? (row[iMotorista]||'').trim() : '';
-    const veiculoVal = iVeiculo !== -1 ? (row[iVeiculo]||'').trim() : '';
-    const carroVal = iCarro !== -1 ? (row[iCarro]||'').trim() : '';
-    const motivoVal = iMotivo !== -1 ? (row[iMotivo]||'').trim() : '';
-    const operadoraVal = iOperadora !== -1 ? (row[iOperadora]||'').trim() : '';
+    const chegadaVal = iChegada !== -1 ? cellValue(cells[iChegada]) : null;
+    const statusVal = iStatus !== -1 ? cellValue(cells[iStatus]) : null;
+    const motoristaVal = iMotorista !== -1 ? cellValue(cells[iMotorista]).trim() : '';
+    const veiculoVal = iVeiculo !== -1 ? cellValue(cells[iVeiculo]).trim() : '';
+    const carroVal = iCarro !== -1 ? cellValue(cells[iCarro]).trim() : '';
+    const motivoVal = iMotivo !== -1 ? cellValue(cells[iMotivo]).trim() : '';
+    const operadoraVal = iOperadora !== -1 ? cellValue(cells[iOperadora]).trim() : '';
 
     out.push({
       d: dISO,
@@ -784,7 +781,7 @@ async function fetchTabRecords(tab){
       mo: motivoVal || null,
       op: operadoraVal || null,
     });
-  }
+  });
   return out;
 }
 
