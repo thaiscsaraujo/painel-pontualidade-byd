@@ -572,9 +572,13 @@ const SPREADSHEET_ID = '1cYcSpXc4W-VnZgdOPIy-_HUJl9cx2vFinzMwV6sbNtg';
 const SHEETS_API_KEY = 'COLE_SUA_CHAVE_DE_API_AQUI';
 const SHEET_TABS = [
   { name: '1° turno' },
+  { name: 'Chines 1° turno' },
   { name: 'Adm' },
+  { name: 'Chines Adm' },
   { name: '2° Turno' },
+  { name: 'Chines 2° Turno' },
   { name: '3° Turno' },
+  { name: 'Chines 3° Turno' },
 ];
 
 const STATUS_TEXT_MAP = [
@@ -608,11 +612,29 @@ function parseDateBR(raw){
 }
 
 function parseTimeHM(raw){
-  if (!raw) return null;
-  const s = raw.trim();
-  const m = s.match(/^(\d{1,2}):(\d{2})/);
-  if (!m) return null;
-  return m[1].padStart(2,'0') + ':' + m[2];
+  if (raw === null || raw === undefined) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  // formato "HH:MM", "HH:MM:SS" ou 12h com AM/PM (ex: "5:31:00 PM")
+  const m = s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|am|pm)?/);
+  if (m){
+    let hh = parseInt(m[1],10);
+    const mm = m[2];
+    const ampm = m[3] ? m[3].toUpperCase() : null;
+    if (ampm === 'PM' && hh < 12) hh += 12;
+    if (ampm === 'AM' && hh === 12) hh = 0;
+    return String(hh).padStart(2,'0') + ':' + mm;
+  }
+  // fallback: número fracionário do dia (ex.: 0.229861111 = 05:31), caso a
+  // planilha devolva o valor bruto sem formatação de horário
+  const num = Number(s);
+  if (!isNaN(num) && num >= 0 && num < 2){
+    const totalMin = Math.round((num % 1) * 24 * 60);
+    const hh = Math.floor(totalMin / 60);
+    const mm = totalMin % 60;
+    return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+  }
+  return null;
 }
 
 function findCol(header, ...candidates){
@@ -809,8 +831,16 @@ const STATUS_LABEL = {
   zh: {'Antecipado':'提前', 'No Horário':'准时', 'Tolerância':'容差', 'Atrasado':'延误'}
 };
 const TURNO_LABEL = {
-  pt: {'1° turno':'1° turno', 'Adm':'Adm', '2° Turno':'2° Turno', '3° Turno':'3° Turno'},
-  zh: {'1° turno':'第一班', 'Adm':'行政班', '2° Turno':'第二班', '3° Turno':'第三班'}
+  pt: {
+    '1° turno':'1° turno', 'Adm':'Adm', '2° Turno':'2° Turno', '3° Turno':'3° Turno',
+    'Chines 1° turno':'1° turno · Chinês', 'Chines Adm':'Adm · Chinês',
+    'Chines 2° Turno':'2° Turno · Chinês', 'Chines 3° Turno':'3° Turno · Chinês'
+  },
+  zh: {
+    '1° turno':'第一班', 'Adm':'行政班', '2° Turno':'第二班', '3° Turno':'第三班',
+    'Chines 1° turno':'第一班（中国）', 'Chines Adm':'行政班（中国）',
+    'Chines 2° Turno':'第二班（中国）', 'Chines 3° Turno':'第三班（中国）'
+  }
 };
 function sT(status){ return status ? (STATUS_LABEL[currentLang][status] || status) : status; }
 function sTu(turno){ return TURNO_LABEL[currentLang][turno] || turno; }
@@ -1104,7 +1134,7 @@ function updateRouteFilterButtonLabel(){
 // ---------- TURNO MULTI-SELECT FILTER (mesma lógica do filtro de roteiro) ----------
 let selectedTurnos = new Set(); // vazio = todos os turnos
 let turnoOptions = [];
-const TURNO_ORDER = ['1° turno','Adm','2° Turno','3° Turno'];
+const TURNO_ORDER = ['1° turno','Chines 1° turno','Adm','Chines Adm','2° Turno','Chines 2° Turno','3° Turno','Chines 3° Turno'];
 
 function setupTurnoFilter(){
   const set = new Set(RECORDS.map(r=>r.t).filter(Boolean));
@@ -1320,7 +1350,7 @@ function renderKpiDetail(kind, recs){
   const withStatus = recs.filter(r=>r.s);
 
   if (kind === 'total'){
-    const turnos = ['1° turno','Adm','2° Turno','3° Turno'];
+    const turnos = TURNO_ORDER;
     const rows = turnos.map(tn=>{
       const tr = recs.filter(r=>r.t===tn);
       return `<tr><td><span class="turno-tag">${sTu(tn)}</span></td><td class="num">${tr.length.toLocaleString('pt-BR')}</td><td class="num">${recs.length ? (100*tr.length/recs.length).toFixed(1) : '0.0'}%</td></tr>`;
@@ -1365,7 +1395,7 @@ let detailedTurno = null; // apenas para destacar/abrir o card de detalhe (não 
 function renderTurnoGrid(recs){
  try {
   const turnoBars = document.getElementById('turnoBars');
-  const turnos = ['1° turno','Adm','2° Turno','3° Turno'];
+  const turnos = TURNO_ORDER;
   turnoBars.innerHTML = turnos.map(tn=>{
     const tr = recs.filter(r=>r.t===tn);
     const withStatus = tr.filter(r=>r.s);
