@@ -431,6 +431,12 @@
     <div class="month-chip" id="monthChips"></div>
     <span class="fb-label" style="margin-left:8px;" data-i18n="lbl_operator">Operadora</span>
     <select id="operadoraFilter"><option value="" data-i18n="opt_all_f">Todas</option></select>
+    <span class="fb-label" style="margin-left:8px;" data-i18n="lbl_group">Grupo</span>
+    <select id="grupoFilter">
+      <option value="" data-i18n="opt_all_f">Todas</option>
+      <option value="Brasileiro" data-i18n="opt_brasileiro">Brasileiro</option>
+      <option value="Chinês" data-i18n="opt_chines">Chinês</option>
+    </select>
     <span class="fb-label" style="margin-left:8px;" data-i18n="lbl_shift">Turno</span>
     <div class="route-filter" id="turnoFilterWrap">
       <button type="button" id="turnoFilterBtn" class="route-filter-btn">
@@ -571,14 +577,14 @@ const SPREADSHEET_ID = '1cYcSpXc4W-VnZgdOPIy-_HUJl9cx2vFinzMwV6sbNtg';
 // Sem ela, o painel funciona normalmente — só não mostra esse aviso.
 const SHEETS_API_KEY = 'COLE_SUA_CHAVE_DE_API_AQUI';
 const SHEET_TABS = [
-  { name: '1° turno' },
-  { name: 'Chines 1° turno' },
-  { name: 'Adm' },
-  { name: 'Chines Adm' },
-  { name: '2° Turno' },
-  { name: 'Chines 2° Turno' },
-  { name: '3° Turno' },
-  { name: 'Chines 3° Turno' },
+  { name: '1° turno Brasileiro', turno: '1° turno', grupo: 'Brasileiro' },
+  { name: 'Chines 1° turno',      turno: '1° turno', grupo: 'Chinês' },
+  { name: 'Adm Brasileiro',       turno: 'Adm',      grupo: 'Brasileiro' },
+  { name: 'Chines Adm',           turno: 'Adm',      grupo: 'Chinês' },
+  { name: '2° Turno Brasileiro',  turno: '2° Turno', grupo: 'Brasileiro' },
+  { name: 'Chines 2° Turno',      turno: '2° Turno', grupo: 'Chinês' },
+  { name: '3° Turno Brasileiro',  turno: '3° Turno', grupo: 'Brasileiro' },
+  { name: 'Chines 3° Turno',      turno: '3° Turno', grupo: 'Chinês' },
 ];
 
 const STATUS_TEXT_MAP = [
@@ -634,6 +640,11 @@ function parseTimeHM(raw){
     const mm = totalMin % 60;
     return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
   }
+  // fallback extra: valor bruto tipo lista "14,51,0,0" (hora,min,seg,ms)
+  const arrM = s.match(/^(\d{1,2}),\s*(\d{1,2})(?:,|$)/);
+  if (arrM){
+    return arrM[1].padStart(2,'0') + ':' + arrM[2].padStart(2,'0');
+  }
   return null;
 }
 
@@ -686,6 +697,18 @@ function cellValue(cell){
   if (!cell) return '';
   if (cell.f !== undefined && cell.f !== null) return String(cell.f);
   if (cell.v === undefined || cell.v === null) return '';
+  // Colunas só de HORA (sem data) às vezes chegam sem versão formatada (.f),
+  // e o valor bruto (.v) vem como lista [hora,minuto,segundo,milissegundo]
+  // em vez de texto — sem isso, o horário de chegada ficava em branco.
+  if (Array.isArray(cell.v)){
+    if (cell.v.length >= 2 && cell.v.every(n => typeof n === 'number')){
+      const hh = String(cell.v[0]).padStart(2,'0');
+      const mm = String(cell.v[1]).padStart(2,'0');
+      const ss = cell.v.length > 2 ? String(cell.v[2]).padStart(2,'0') : '00';
+      return hh + ':' + mm + ':' + ss;
+    }
+    return cell.v.join(',');
+  }
   return String(cell.v);
 }
 
@@ -751,7 +774,8 @@ async function fetchTabRecords(tab){
       d: dISO,
       c: code,
       ds: desc,
-      t: tabName,
+      t: tab.turno,
+      grp: tab.grupo,
       h: chegadaVal ? parseTimeHM(chegadaVal) : null,
       s: statusVal ? normalizeStatus(statusVal) : null,
       m: motoristaVal || null,
@@ -831,17 +855,14 @@ const STATUS_LABEL = {
   zh: {'Antecipado':'提前', 'No Horário':'准时', 'Tolerância':'容差', 'Atrasado':'延误'}
 };
 const TURNO_LABEL = {
-  pt: {
-    '1° turno':'1° turno', 'Adm':'Adm', '2° Turno':'2° Turno', '3° Turno':'3° Turno',
-    'Chines 1° turno':'1° turno · Chinês', 'Chines Adm':'Adm · Chinês',
-    'Chines 2° Turno':'2° Turno · Chinês', 'Chines 3° Turno':'3° Turno · Chinês'
-  },
-  zh: {
-    '1° turno':'第一班', 'Adm':'行政班', '2° Turno':'第二班', '3° Turno':'第三班',
-    'Chines 1° turno':'第一班（中国）', 'Chines Adm':'行政班（中国）',
-    'Chines 2° Turno':'第二班（中国）', 'Chines 3° Turno':'第三班（中国）'
-  }
+  pt: {'1° turno':'1° turno', 'Adm':'Adm', '2° Turno':'2° Turno', '3° Turno':'3° Turno'},
+  zh: {'1° turno':'第一班', 'Adm':'行政班', '2° Turno':'第二班', '3° Turno':'第三班'}
 };
+const GRUPO_LABEL = {
+  pt: {'Brasileiro':'Brasileiro', 'Chinês':'Chinês'},
+  zh: {'Brasileiro':'巴西', 'Chinês':'中国'}
+};
+function sG(grupo){ return grupo ? (GRUPO_LABEL[currentLang][grupo] || grupo) : grupo; }
 function sT(status){ return status ? (STATUS_LABEL[currentLang][status] || status) : status; }
 function sTu(turno){ return TURNO_LABEL[currentLang][turno] || turno; }
 
@@ -849,6 +870,7 @@ const I18N = {
   pt: {
     title: 'Painel de Pontualidade',
     lbl_period: 'Período', lbl_to: 'até', lbl_month: 'Mês', lbl_operator: 'Operadora',
+    lbl_group: 'Grupo', opt_brasileiro: 'Brasileiro', opt_chines: 'Chinês',
     opt_all_f: 'Todas', lbl_shift: 'Turno', all_shifts: 'Todos os turnos',
     search_shift: 'Buscar turno…', select_visible: 'Selecionar visíveis', clear_selection: 'Limpar seleção',
     lbl_route: 'Roteiro', all_routes: 'Todos os roteiros', search_route: 'Buscar roteiro ou destino…',
@@ -901,6 +923,7 @@ const I18N = {
   zh: {
     title: '准点率看板',
     lbl_period: '期间', lbl_to: '至', lbl_month: '月份', lbl_operator: '运营商',
+    lbl_group: '分组', opt_brasileiro: '巴西', opt_chines: '中国',
     opt_all_f: '全部', lbl_shift: '班次', all_shifts: '所有班次',
     search_shift: '搜索班次…', select_visible: '选择可见项', clear_selection: '清除选择',
     lbl_route: '路线', all_routes: '所有路线', search_route: '搜索路线或目的地…',
@@ -1008,6 +1031,7 @@ function renderOperadoraOptions(){
 }
 renderOperadoraOptions();
 operadoraSelect.addEventListener('change', ()=>refreshAll());
+document.getElementById('grupoFilter').addEventListener('change', ()=>refreshAll());
 
 function setActiveMonthChip(activeMonth){
   monthChips.querySelectorAll('button').forEach(b=>{
@@ -1042,6 +1066,7 @@ document.getElementById('resetFilters').addEventListener('click', ()=>{
   document.getElementById('dateTo').value = maxDate;
   document.getElementById('searchBox').value = '';
   document.getElementById('operadoraFilter').value = '';
+  document.getElementById('grupoFilter').value = '';
   selectedRoutes.clear();
   updateRouteFilterButtonLabel();
   document.getElementById('routeFilterPanel').style.display = 'none';
@@ -1134,7 +1159,7 @@ function updateRouteFilterButtonLabel(){
 // ---------- TURNO MULTI-SELECT FILTER (mesma lógica do filtro de roteiro) ----------
 let selectedTurnos = new Set(); // vazio = todos os turnos
 let turnoOptions = [];
-const TURNO_ORDER = ['1° turno','Chines 1° turno','Adm','Chines Adm','2° Turno','Chines 2° Turno','3° Turno','Chines 3° Turno'];
+const TURNO_ORDER = ['1° turno','Adm','2° Turno','3° Turno'];
 
 function setupTurnoFilter(){
   const set = new Set(RECORDS.map(r=>r.t).filter(Boolean));
@@ -1239,7 +1264,8 @@ function getFilteredRecords(){
   const from = document.getElementById('dateFrom').value || minDate;
   const to = document.getElementById('dateTo').value || maxDate;
   const op = document.getElementById('operadoraFilter').value;
-  return RECORDS.filter(r => r.d >= from && r.d <= to && (!op || r.op === op)
+  const grp = document.getElementById('grupoFilter').value;
+  return RECORDS.filter(r => r.d >= from && r.d <= to && (!op || r.op === op) && (!grp || r.grp === grp)
     && (selectedRoutes.size===0 || selectedRoutes.has(r.c))
     && (selectedTurnos.size===0 || selectedTurnos.has(r.t)));
 }
