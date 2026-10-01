@@ -208,7 +208,7 @@
 
   /* ---- KPI ROW ---- */
   .kpi-row{
-    display:grid;grid-template-columns:1.15fr 1fr 1fr 1fr 1fr 1fr;gap:14px;
+    display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr 1fr;gap:14px;
     margin-top:16px;
   }
   .kpi-card{
@@ -481,10 +481,9 @@
     <div class="panel" id="turnoPanel">
       <div class="turno-bars" id="turnoBars"></div>
       <div class="legend-row">
-        <span class="swatch"><i style="background:var(--teal-500)"></i> Antecipado</span>
-        <span class="swatch"><i style="background:var(--teal-700)"></i> No horário</span>
-        <span class="swatch"><i style="background:var(--amber-500)"></i> Tolerância</span>
-        <span class="swatch"><i style="background:var(--red-600)"></i> Atrasado</span>
+        <span class="swatch"><i style="background:#5b6fd6"></i> Antecipado</span>
+        <span class="swatch"><i style="background:#147370"></i> No horário</span>
+        <span class="swatch"><i style="background:#c8323f"></i> Atrasado</span>
         <span style="margin-left:auto;color:var(--ink-500);font-style:italic;">Clique numa barra para ver o detalhamento</span>
       </div>
       <div id="turnoDetailCard" class="day-detail-card" style="display:none;"></div>
@@ -502,10 +501,7 @@
     <div class="panel">
       <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
       <div class="legend-row">
-        <span class="swatch"><i style="background:var(--teal-600)"></i> Pontual</span>
-        <span class="swatch"><i style="background:var(--amber-500)"></i> Tolerância</span>
-        <span class="swatch"><i style="background:var(--red-600)"></i> Atrasado</span>
-        <span style="margin-left:auto;color:var(--ink-500);font-style:italic;">Clique em um ponto do gráfico para ver o detalhe do dia</span>
+        <span style="color:var(--ink-500);font-style:italic;">Clique em um ponto do gráfico para ver o detalhe do dia</span>
       </div>
       <div id="dayDetailCard" class="day-detail-card" style="display:none;"></div>
     </div>
@@ -591,8 +587,10 @@ const STATUS_TEXT_MAP = [
   ['Antecipado', 'Antecipado'],
   ['No Horário', 'No Horário'],
   ['No Horario', 'No Horário'],
-  ['Tolerância', 'Tolerância'],
-  ['Tolerancia', 'Tolerância'],
+  // Tolerância passa a contar como No Horário em todo o painel (a pedido do
+  // usuário) — a distinção não é mais exibida em lugar nenhum.
+  ['Tolerância', 'No Horário'],
+  ['Tolerancia', 'No Horário'],
   ['Atrasado', 'Atrasado'],
 ];
 
@@ -833,10 +831,9 @@ let RECORDS = [];
 const STATUS_COLORS = {
   'Antecipado': '#5b6fd6',
   'No Horário': '#147370',
-  'Tolerância': '#e3a530',
   'Atrasado': '#c8323f'
 };
-const STATUS_ORDER = ['Antecipado','No Horário','Tolerância','Atrasado'];
+const STATUS_ORDER = ['Antecipado','No Horário','Atrasado'];
 
 function fmtPct(v){ return (v===null||v===undefined||isNaN(v)) ? '—' : v.toFixed(1)+'%'; }
 function fmtDateBR(iso){ const [y,m,d]=iso.split('-'); return d+'/'+m+'/'+y; }
@@ -848,8 +845,8 @@ function fmtDateBR(iso){ const [y,m,d]=iso.split('-'); return d+'/'+m+'/'+y; }
 let currentLang = 'pt';
 
 const STATUS_LABEL = {
-  pt: {'Antecipado':'Antecipado', 'No Horário':'No Horário', 'Tolerância':'Tolerância', 'Atrasado':'Atrasado'},
-  zh: {'Antecipado':'提前', 'No Horário':'准时', 'Tolerância':'容差', 'Atrasado':'延误'}
+  pt: {'Antecipado':'Antecipado', 'No Horário':'No Horário', 'Atrasado':'Atrasado'},
+  zh: {'Antecipado':'提前', 'No Horário':'准时', 'Atrasado':'延误'}
 };
 const TURNO_LABEL = {
   pt: {'1° turno':'1° turno', 'Adm':'Adm', '2° Turno':'2° Turno', '3° Turno':'3° Turno'},
@@ -888,30 +885,28 @@ const I18N = {
     kpi_total: 'Total de viagens', kpi_total_foot: c=>c+' com chegada registrada',
     kpi_pontual: '% Pontualidade', kpi_pontual_foot: 'chegadas no horário',
     kpi_antecipado: '% Antecipação', kpi_antecipado_foot: c=>c+' chegadas',
-    kpi_tolerancia: '% Tolerância', kpi_tolerancia_foot: c=>c+' chegadas',
     kpi_atraso: '% Atraso', kpi_atraso_foot: c=>c+' chegadas',
     kpi_sem_registro: 'Sem registro', kpi_sem_registro_foot: p=>p+'% do total',
     see_details: 'ver detalhes →',
     kd_total_by_shift: 'Total de viagens por turno',
     kd_pontual_title: 'Roteiros com mais chegadas pontuais (no horário)', kd_pontual_empty: 'Nenhuma chegada pontual no período.',
     kd_antecipado_title: 'Roteiros com mais chegadas antecipadas', kd_antecipado_empty: 'Nenhuma chegada antecipada no período.',
-    kd_tolerancia_title: 'Roteiros com mais ocorrências de tolerância', kd_tolerancia_empty: 'Nenhuma tolerância no período.',
     kd_atraso_title: 'Roteiros com mais atrasos', kd_atraso_empty: 'Nenhum atraso no período. 🎉',
     kd_sem_registro_title: 'Roteiros com mais viagens sem chegada registrada', kd_sem_registro_empty: 'Todas as viagens têm chegada registrada.',
     tb_detailing: '· detalhando ✓', tb_click_details: '· clique para detalhes',
     tb_registered_of: (a,b)=>a+' de '+b+' registradas',
-    turno_detail_suffix: ' — roteiros com mais atraso/tolerância',
-    turno_detail_empty: 'Nenhum atraso ou tolerância nesse turno no período.',
+    turno_detail_suffix: ' — roteiros com mais atraso',
+    turno_detail_empty: 'Nenhum atraso nesse turno no período.',
     chart_load_error: 'Não foi possível carregar o gráfico. Os dados de tendência continuam na tabela de roteiros abaixo.',
     day_trips: 'Viagens no dia', day_pontual: '% Pontualidade', day_antecip: 'Antecipações',
-    day_atraso: 'Atrasos', day_tolerancia: 'Tolerância', day_sem_registro: 'Sem registro',
-    day_problem_prefix: n=>'Roteiros com atraso ou tolerância nesse dia ('+n+')',
-    day_no_problems: 'Nenhum atraso ou tolerância registrado nesse dia. 🎉',
+    day_atraso: 'Atrasos', day_sem_registro: 'Sem registro',
+    day_problem_prefix: n=>'Roteiros com atraso nesse dia ('+n+')',
+    day_no_problems: 'Nenhum atraso registrado nesse dia. 🎉',
     route_shown: (a,b)=>a+' roteiro(s) exibido(s) de '+b+' no total.',
     low_coverage: 'baixa cobertura', no_record: 'Sem registro', not_informed: 'não informado',
     no_trips_period: 'Nenhuma viagem no período selecionado.',
     trip_detail_title: (n,code)=>n+' viagem(ns) do roteiro '+code+' no período',
-    delays_suffix: 'atraso(s)', tolerance_suffix: 'em tolerância', no_record_suffix: 'sem registro de chegada',
+    delays_suffix: 'atraso(s)', no_record_suffix: 'sem registro de chegada',
     no_shift_found: 'Nenhum turno encontrado.', no_route_found: 'Nenhum roteiro encontrado.',
     eyebrow_motivo: 'Diagnóstico', h2_motivo: 'Motivos de atraso',
     desc_motivo: 'Percentual de cada motivo sobre o total de viagens com motivo de atraso informado, dentro do período e filtros selecionados.',
@@ -941,30 +936,28 @@ const I18N = {
     kpi_total: '总行程数', kpi_total_foot: c=>'已登记到达 '+c+' 条',
     kpi_pontual: '准点率', kpi_pontual_foot: '按时到达',
     kpi_antecipado: '提前率', kpi_antecipado_foot: c=>c+' 次到达',
-    kpi_tolerancia: '容差率', kpi_tolerancia_foot: c=>c+' 次到达',
     kpi_atraso: '延误率', kpi_atraso_foot: c=>c+' 次到达',
     kpi_sem_registro: '无记录', kpi_sem_registro_foot: p=>'占总数 '+p+'%',
     see_details: '查看详情 →',
     kd_total_by_shift: '各班次总行程数',
     kd_pontual_title: '按时到达最多的路线', kd_pontual_empty: '该期间内没有按时到达的记录。',
     kd_antecipado_title: '提前到达最多的路线', kd_antecipado_empty: '该期间内没有提前到达的记录。',
-    kd_tolerancia_title: '容差发生最多的路线', kd_tolerancia_empty: '该期间内没有容差记录。',
     kd_atraso_title: '延误最多的路线', kd_atraso_empty: '该期间内没有延误记录。🎉',
     kd_sem_registro_title: '无到达记录最多的路线', kd_sem_registro_empty: '所有行程均已登记到达。',
     tb_detailing: '· 查看中 ✓', tb_click_details: '· 点击查看详情',
     tb_registered_of: (a,b)=>a+' / '+b+' 已登记',
-    turno_detail_suffix: ' — 延误/容差最多的路线',
-    turno_detail_empty: '该班次在此期间内没有延误或容差记录。',
+    turno_detail_suffix: ' — 延误最多的路线',
+    turno_detail_empty: '该班次在此期间内没有延误记录。',
     chart_load_error: '图表加载失败。趋势数据仍可在下方路线表中查看。',
     day_trips: '当日行程数', day_pontual: '准点率', day_antecip: '提前次数',
-    day_atraso: '延误次数', day_tolerancia: '容差次数', day_sem_registro: '无记录',
-    day_problem_prefix: n=>'当日延误或容差路线 ('+n+')',
-    day_no_problems: '当日没有延误或容差记录。🎉',
+    day_atraso: '延误次数', day_sem_registro: '无记录',
+    day_problem_prefix: n=>'当日延误路线 ('+n+')',
+    day_no_problems: '当日没有延误记录。🎉',
     route_shown: (a,b)=>'显示 '+a+' 条路线，共 '+b+' 条。',
     low_coverage: '覆盖率低', no_record: '无记录', not_informed: '未填写',
     no_trips_period: '所选期间内没有行程。',
     trip_detail_title: (n,code)=>'路线 '+code+' 在该期间共 '+n+' 次行程',
-    delays_suffix: '次延误', tolerance_suffix: '次容差', no_record_suffix: '次无到达记录',
+    delays_suffix: '次延误', no_record_suffix: '次无到达记录',
     no_shift_found: '未找到班次。', no_route_found: '未找到路线。',
     eyebrow_motivo: '诊断分析', h2_motivo: '延误原因',
     desc_motivo: '在所选期间及筛选条件下，各延误原因占已填写延误原因行程总数的百分比。',
@@ -1330,11 +1323,10 @@ function renderKPI(recs){
   const withStatus = recs.filter(r=>r.s);
   const cs = withStatus.length;
   const cnt = k => withStatus.filter(r=>r.s===k).length;
-  const antecipado = cnt('Antecipado'), noHorario = cnt('No Horário'), tolerancia = cnt('Tolerância'), atrasado = cnt('Atrasado');
+  const antecipado = cnt('Antecipado'), noHorario = cnt('No Horário'), atrasado = cnt('Atrasado');
   const pctPontual = cs ? 100*noHorario/cs : null;
   const pctAntecipado = cs ? 100*antecipado/cs : null;
   const pctAtraso = cs ? 100*atrasado/cs : null;
-  const pctTolerancia = cs ? 100*tolerancia/cs : null;
   const semStatus = recs.length - cs;
 
   const kpiRow = document.getElementById('kpiRow');
@@ -1342,7 +1334,6 @@ function renderKPI(recs){
     {key:'total', glyph:'Σ', color:'var(--teal-900)', label:t('kpi_total'), value: recs.length.toLocaleString('pt-BR'), foot: t('kpi_total_foot')(cs.toLocaleString('pt-BR')), accent:true},
     {key:'pontual', glyph:'✓', color:'var(--teal-600)', label:t('kpi_pontual'), value: fmtPct(pctPontual), foot:t('kpi_pontual_foot')},
     {key:'antecipado', glyph:'«', color:'#5b6fd6', label:t('kpi_antecipado'), value: fmtPct(pctAntecipado), foot: t('kpi_antecipado_foot')(antecipado.toLocaleString('pt-BR'))},
-    {key:'tolerancia', glyph:'~', color:'var(--amber-500)', label:t('kpi_tolerancia'), value: fmtPct(pctTolerancia), foot: t('kpi_tolerancia_foot')(tolerancia.toLocaleString('pt-BR'))},
     {key:'atraso', glyph:'!', color:'var(--red-600)', label:t('kpi_atraso'), value: fmtPct(pctAtraso), foot: t('kpi_atraso_foot')(atrasado.toLocaleString('pt-BR'))},
     {key:'sem_registro', glyph:'?', color:'#8a94a3', label:t('kpi_sem_registro'), value: semStatus.toLocaleString('pt-BR'), foot: t('kpi_sem_registro_foot')(recs.length ? (100*semStatus/recs.length).toFixed(1) : '0.0')},
   ];
@@ -1385,7 +1376,6 @@ function renderKpiDetail(kind, recs){
     const kindMap = {
       pontual: {statuses:['No Horário'], title:t('kd_pontual_title'), emptyMsg:t('kd_pontual_empty')},
       antecipado: {statuses:['Antecipado'], title:t('kd_antecipado_title'), emptyMsg:t('kd_antecipado_empty')},
-      tolerancia: {statuses:['Tolerância'], title:t('kd_tolerancia_title'), emptyMsg:t('kd_tolerancia_empty')},
       atraso: {statuses:['Atrasado'], title:t('kd_atraso_title'), emptyMsg:t('kd_atraso_empty')},
       sem_registro: {statuses:[null], title:t('kd_sem_registro_title'), emptyMsg:t('kd_sem_registro_empty')},
     };
@@ -1424,12 +1414,11 @@ function renderTurnoGrid(recs){
     const withStatus = tr.filter(r=>r.s);
     const cs = withStatus.length;
     const cnt = k => withStatus.filter(r=>r.s===k).length;
-    const antecipado = cnt('Antecipado'), noHorario = cnt('No Horário'), tolerancia = cnt('Tolerância'), atrasado = cnt('Atrasado');
+    const antecipado = cnt('Antecipado'), noHorario = cnt('No Horário'), atrasado = cnt('Atrasado');
     const pctPontual = cs ? 100*noHorario/cs : 0;
     const segs = [
       {v:antecipado, color:STATUS_COLORS['Antecipado'], label:sT('Antecipado')},
       {v:noHorario, color:STATUS_COLORS['No Horário'], label:sT('No Horário')},
-      {v:tolerancia, color:STATUS_COLORS['Tolerância'], label:sT('Tolerância')},
       {v:atrasado, color:STATUS_COLORS['Atrasado'], label:sT('Atrasado')},
     ];
     const segsHtml = cs ? segs.map(s=>{
@@ -1463,7 +1452,7 @@ function renderTurnoGrid(recs){
 function renderTurnoDetail(turno, recs){
   const card = document.getElementById('turnoDetailCard');
   if (!turno){ card.style.display = 'none'; return; }
-  const routes = aggByRoute(recs.filter(r=>r.t===turno && (r.s==='Atrasado'||r.s==='Tolerância')), ()=>true).slice(0,10);
+  const routes = aggByRoute(recs.filter(r=>r.t===turno && r.s==='Atrasado'), ()=>true).slice(0,10);
   const rows = routes.map(r=>`
     <tr><td><b style="color:var(--teal-800)">${r.code}</b> <span style="color:var(--ink-500)">${r.desc||''}</span></td><td class="num">${r.count}</td></tr>`).join('');
   card.innerHTML = `
@@ -1489,18 +1478,17 @@ function renderTrend(recs){
   const byDate = {};
   recs.forEach(r=>{
     if (!r.s) return;
-    if (!byDate[r.d]) byDate[r.d] = {Antecipado:0,'No Horário':0,'Tolerância':0,Atrasado:0};
+    if (!byDate[r.d]) byDate[r.d] = {Antecipado:0,'No Horário':0,Atrasado:0};
     byDate[r.d][r.s]++;
   });
   const dates = Object.keys(byDate).sort();
   const trend = dates.map(d=>{
     const c = byDate[d];
-    const cs = c['Antecipado']+c['No Horário']+c['Tolerância']+c['Atrasado'];
+    const cs = c['Antecipado']+c['No Horário']+c['Atrasado'];
     return {
       data: d,
       pct_no_horario: cs ? 100*c['No Horário']/cs : 0,
       pct_antecipado: cs ? 100*c['Antecipado']/cs : 0,
-      pct_tolerancia: cs ? 100*c['Tolerância']/cs : 0,
       pct_atraso: cs ? 100*c['Atrasado']/cs : 0,
     };
   });
@@ -1529,13 +1517,6 @@ function renderTrend(recs){
           borderColor: STATUS_COLORS['Antecipado'], backgroundColor: 'rgba(91,111,214,0.5)',
           fill: 'stack', stack:'s', tension: 0.3, pointRadius: 0, pointHoverRadius: 5,
           pointBackgroundColor: STATUS_COLORS['Antecipado'], pointBorderColor:'#fff', pointBorderWidth:1.5, borderWidth: 1.5
-        },
-        {
-          label: sT('Tolerância'),
-          data: trend.map(d=>d.pct_tolerancia),
-          borderColor: STATUS_COLORS['Tolerância'], backgroundColor: 'rgba(227,165,48,0.55)',
-          fill: 'stack', stack:'s', tension: 0.3, pointRadius: 0, pointHoverRadius: 5,
-          pointBackgroundColor: STATUS_COLORS['Tolerância'], pointBorderColor:'#fff', pointBorderWidth:1.5, borderWidth: 1.5
         },
         {
           label: sT('Atrasado'),
@@ -1599,19 +1580,17 @@ function renderDayDetail(day, recs){
   const withStatus = dayRecs.filter(r=>r.s);
   const cs = withStatus.length;
   const cnt = k => withStatus.filter(r=>r.s===k).length;
-  const antecipado = cnt('Antecipado'), noHorario = cnt('No Horário'), tolerancia = cnt('Tolerância'), atrasado = cnt('Atrasado');
+  const antecipado = cnt('Antecipado'), noHorario = cnt('No Horário'), atrasado = cnt('Atrasado');
   const pctPontual = cs ? 100*noHorario/cs : null;
   const semReg = dayRecs.length - cs;
 
-  const problemTrips = dayRecs.filter(r=>r.s==='Atrasado' || r.s==='Tolerância')
-    .sort((a,b)=> (a.s==='Atrasado'?0:1) - (b.s==='Atrasado'?0:1));
+  const problemTrips = dayRecs.filter(r=>r.s==='Atrasado');
 
   const kpis = [
     {l:t('day_trips'), v: dayRecs.length, cls:''},
     {l:t('day_pontual'), v: fmtPct(pctPontual), cls:''},
     {l:t('day_antecip'), v: antecipado, cls:'antecipado'},
     {l:t('day_atraso'), v: atrasado, cls:'red'},
-    {l:t('day_tolerancia'), v: tolerancia, cls:'amber'},
     {l:t('day_sem_registro'), v: semReg, cls:'amber'},
   ];
 
@@ -1658,14 +1637,13 @@ function aggregateRoutes(recs){
   const map = new Map();
   recs.forEach(r=>{
     const key = r.c+'||'+r.t;
-    if (!map.has(key)) map.set(key, {code:r.c, desc:r.ds, turno:r.t, total_viagens:0, com_registro:0, antecipado:0, no_horario:0, tolerancia:0, atrasado:0});
+    if (!map.has(key)) map.set(key, {code:r.c, desc:r.ds, turno:r.t, total_viagens:0, com_registro:0, antecipado:0, no_horario:0, atrasado:0});
     const a = map.get(key);
     a.total_viagens++;
     if (r.s){
       a.com_registro++;
       if (r.s==='Antecipado') a.antecipado++;
       else if (r.s==='No Horário') a.no_horario++;
-      else if (r.s==='Tolerância') a.tolerancia++;
       else if (r.s==='Atrasado') a.atrasado++;
     }
   });
@@ -1751,12 +1729,11 @@ function renderTripDetail(code, turno, recs){
   const trips = recs.filter(r=>r.c===code && r.t===turno).slice().sort((a,b)=> a.d < b.d ? 1 : -1);
   if (!trips.length) return `<div class="detail-inner"><div class="no-trips">${t('no_trips_period')}</div></div>`;
 
-  const problems = trips.filter(tr=>tr.s==='Atrasado' || tr.s==='Tolerância');
   const atrasos = trips.filter(tr=>tr.s==='Atrasado').length;
   const semReg = trips.filter(tr=>!tr.s).length;
 
   const rows = trips.map(tr=>{
-    const isProblem = tr.s==='Atrasado' || tr.s==='Tolerância';
+    const isProblem = tr.s==='Atrasado';
     const statusHtml = tr.s
       ? `<span class="status-chip"><i style="background:${STATUS_COLORS[tr.s]}"></i>${sT(tr.s)}</span>`
       : `<span class="status-chip" style="color:var(--ink-500)"><i style="background:#c7d1cf"></i>${t('no_record')}</span>`;
@@ -1777,7 +1754,6 @@ function renderTripDetail(code, turno, recs){
       <div class="detail-title">${t('trip_detail_title')(trips.length, code)}</div>
       <div class="detail-stats">
         <span><b>${atrasos}</b> ${t('delays_suffix')}</span>
-        <span><b>${problems.length - atrasos}</b> ${t('tolerance_suffix')}</span>
         <span><b>${semReg}</b> ${t('no_record_suffix')}</span>
       </div>
     </div>
