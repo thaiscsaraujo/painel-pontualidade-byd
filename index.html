@@ -569,10 +569,20 @@
 
 <script>
 // ---------- CARREGAMENTO AO VIVO (Google Sheets via JSONP — sem bloqueio de CORS, sem chave) ----------
-const SPREADSHEET_ID = '1cYcSpXc4W-VnZgdOPIy-_HUJl9cx2vFinzMwV6sbNtg';
+// Fonte principal: planilha ESPELHO (cópia por fórmula da base, imune a filtros
+// aplicados na base). Reserva: a base original.
+// Corte de data: o painel só considera viagens a partir desta data (AAAA-MM-DD).
+// Para mudar o período exibido, altere apenas esta linha.
+const DATA_MINIMA = '2026-09-01';
+const SPREADSHEET_ID_ORIG = '1cYcSpXc4W-VnZgdOPIy-_HUJl9cx2vFinzMwV6sbNtg';
+const SPREADSHEET_ID = '1ckVCb8U_CjbwkmKZyJ4Uez7ccf591yu6SAox4NOIwZs';
 // Opcional: só necessária para o aviso de "filtro ativo na planilha" (ver checkActiveFilters).
 // Sem ela, o painel funciona normalmente — só não mostra esse aviso.
 const SHEETS_API_KEY = 'COLE_SUA_CHAVE_DE_API_AQUI';
+// URL do script publicado na planilha (Apps Script > Implantar > App da Web).
+// Lê TODAS as linhas, ignorando filtros ativos. Vazio = usa a leitura padrão.
+const APPS_SCRIPT_URL = 'COLE_A_URL_DO_SCRIPT_AQUI';
+const AS_URL_OK = () => APPS_SCRIPT_URL && APPS_SCRIPT_URL.indexOf('https://script.google.com/') === 0;
 const SHEET_TABS = [
   { name: '1° turno Brasileiro', turno: '1° turno', grupo: 'Brasileiro', headerRows: 1 },
   { name: 'Chines 1° turno',      turno: '1° turno', grupo: 'Chinês', headerRows: 1 },
@@ -580,8 +590,8 @@ const SHEET_TABS = [
   { name: 'Chines Adm',           turno: 'Adm',      grupo: 'Chinês', headerRows: 1 },
   { name: '2° Turno Brasileiro',  turno: '2° Turno', grupo: 'Brasileiro', headerRows: 1 },
   { name: 'Chines 2° Turno',      turno: '2° Turno', grupo: 'Chinês', headerRows: 1 },
-  { name: '3° Turno Brasileiro',  turno: '3° Turno', grupo: 'Brasileiro', headerRows: 2 },
-  { name: 'Chines 3° Turno',      turno: '3° Turno', grupo: 'Chinês', headerRows: 2 },
+  { name: '3° Turno Brasileiro',  turno: '3° Turno', grupo: 'Brasileiro', headerRows: 1 },
+  { name: 'Chines 3° Turno',      turno: '3° Turno', grupo: 'Chinês', headerRows: 1 },
 ];
 
 const STATUS_TEXT_MAP = [
@@ -711,18 +721,27 @@ function cellValue(cell){
   return String(cell.v);
 }
 
-const BUILD_ID = 'v-carro-2';
-const DIAG = { tabs:0, rawOk:0, rawFail:[], filled:0, unmatched:0 };
+const BUILD_ID = 'v-espelho-3';
+const DIAG = { tabs:0, rawOk:0, rawFail:[], filled:0, unmatched:0, apiTabs:0, apiFail:[], asTabs:0, asFail:[], src:'', srcErr:'', cortadas:0 };
+function resetDiag(){ Object.assign(DIAG,{tabs:0,rawOk:0,rawFail:[],filled:0,unmatched:0,apiTabs:0,apiFail:[],asTabs:0,asFail:[]}); }
+const API_KEY_OK = () => SHEETS_API_KEY && SHEETS_API_KEY !== 'COLE_SUA_CHAVE_DE_API_AQUI';
 function renderDiag(){
   const el = document.getElementById('diagInfo');
   if (!el) return;
-  let txt = BUILD_ID + ' · leitura complementar de texto: ' + DIAG.rawOk + '/' + DIAG.tabs + ' abas · campos recuperados: ' + DIAG.filled;
-  if (DIAG.rawFail.length) txt += ' · FALHOU em: ' + DIAG.rawFail.join(', ');
-  if (DIAG.unmatched) txt += ' · linhas sem correspondência: ' + DIAG.unmatched;
+  let txt = BUILD_ID + ' · planilha: ' + (DIAG.src || '—') + ' · ';
+  if (DIAG.asTabs) txt += 'fonte: script da planilha (' + DIAG.asTabs + '/' + SHEET_TABS.length + ' abas, ignora filtros)';
+  else if (DIAG.apiTabs) txt += 'fonte: Google Sheets API (' + DIAG.apiTabs + '/' + SHEET_TABS.length + ' abas)';
+  else txt += 'fonte: leitura padrão do Google (sem chave de API)';
+  txt += ' · dados a partir de ' + DATA_MINIMA.split('-').reverse().join('/') + (DIAG.cortadas ? ' (' + DIAG.cortadas + ' linhas anteriores ocultas)' : '');
+  if (DIAG.srcErr) txt += ' · espelho indisponível: ' + DIAG.srcErr;
+  if (DIAG.asFail.length) txt += ' · script falhou em: ' + DIAG.asFail.join(' | ');
+  if (DIAG.apiFail.length) txt += ' · API falhou em: ' + DIAG.apiFail.join(' | ');
+  if (DIAG.tabs) txt += ' · leitura complementar: ' + DIAG.rawOk + '/' + DIAG.tabs + ' · campos recuperados: ' + DIAG.filled;
   el.textContent = txt;
 }
 
-async function fetchTabRecords(tab){
+async function fetchTabRecords(tab, sid){
+  sid = sid || SPREADSHEET_ID;
   const tabName = tab.name;
   // headers=N diz ao Google exatamente quantas linhas são de cabeçalho, por
   // aba (normalmente 1; abas com título mesclado acima do cabeçalho real,
@@ -731,27 +750,32 @@ async function fetchTabRecords(tab){
   // CHEGADA BYD, aparecerem corretamente) — evitando o problema de usar
   // headers=0 (que misturava a linha de cabeçalho nos dados e confundia
   // a detecção de tipo da coluna de horário).
-  const headerRows = tab.headerRows || 1;
-  const baseUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?sheet=${encodeURIComponent(tabName)}`;
+  const baseUrl = `https://docs.google.com/spreadsheets/d/${sid}/gviz/tq?sheet=${encodeURIComponent(tabName)}`;
   // Duas leituras da mesma aba:
-  //  1) "tipada" (headers=N): o Google formata corretamente colunas de hora/data,
-  //     mas em colunas de tipo misto (ex.: CARRO, com 8254 e M-0880 juntos) ele
-  //     devolve VAZIO para as células que não combinam com o tipo dominante.
-  //  2) "bruta" (headers=0): tudo vem como texto, então não perde valores como
-  //     M-0880 / F-0210 / 058IBS. Usada apenas para completar campos de texto.
-  const [data, dataRaw] = await Promise.all([
-    jsonpFetchTable(`${baseUrl}&headers=${headerRows}`),
-    jsonpFetchTable(`${baseUrl}&headers=0`).catch((e) => { console.warn('Leitura bruta falhou em', tabName, e); return null; }),
-  ]);
+  //  1) "bruta" (headers=0): tudo vem como texto, então não perde valores como
+  //     M-0880 / F-0210 / 058IBS. Também serve para DESCOBRIR em que linha está
+  //     o cabeçalho (a primeira que contém "ROTEIRO"), sem depender de configuração
+  //     fixa — a estrutura das abas já mudou antes (título mesclado no 3° Turno).
+  //  2) "tipada" (headers=N, com N descoberto acima): o Google formata
+  //     corretamente colunas de hora/data (essencial para CHEGADA BYD), mas em
+  //     colunas de tipo misto devolve VAZIO para células fora do tipo dominante;
+  //     por isso a bruta completa os campos de texto que vierem vazios.
+  const dataRaw = await jsonpFetchTable(`${baseUrl}&headers=0`).catch((e) => { console.warn('Leitura bruta falhou em', tabName, e); return null; });
+  const rawRows = (dataRaw && dataRaw.status !== 'error' && dataRaw.table && dataRaw.table.rows)
+    ? dataRaw.table.rows.map(r => (r.c || []).map(cellValue))
+    : null;
+  let headerRows = tab.headerRows || 1;
+  if (rawRows){
+    const hi = rawRows.findIndex(r => r.some(v => String(v||'').trim().toUpperCase() === 'ROTEIRO'));
+    if (hi !== -1) headerRows = hi + 1;
+  }
+  const data = await jsonpFetchTable(`${baseUrl}&headers=${headerRows}`);
   if (!data || data.status === 'error'){
     const msg = (data && data.errors && data.errors[0] && data.errors[0].detailed_message) || 'erro desconhecido ao ler a aba';
     throw new Error('Aba "' + tabName + '": ' + msg);
   }
   const table = data.table;
   if (!table || !table.cols || !table.rows) return [];
-  const rawRows = (dataRaw && dataRaw.status !== 'error' && dataRaw.table && dataRaw.table.rows)
-    ? dataRaw.table.rows.map(r => (r.c || []).map(cellValue))
-    : null;
   DIAG.tabs++;
   if (rawRows) DIAG.rawOk++; else DIAG.rawFail.push(tabName);
 
@@ -837,9 +861,112 @@ async function fetchTabRecords(tab){
   return out;
 }
 
+// ---------- LEITURA PELA GOOGLE SHEETS API (v4) ----------
+// Entrega o texto de cada célula exatamente como está na planilha (sem inferência
+// de tipo por coluna) e ignora qualquer Filtro ativo. Usada quando há chave.
+async function fetchTabRecordsV4(tab){
+  const range = encodeURIComponent("'" + tab.name + "'");
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}?key=${SHEETS_API_KEY}&valueRenderOption=FORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`;
+  const resp = await fetch(url, { cache: 'no-store' });
+  if (!resp.ok){
+    let detail = 'HTTP ' + resp.status;
+    try { const b = await resp.json(); if (b && b.error && b.error.message) detail += ' — ' + b.error.message; } catch(e){}
+    throw new Error(detail);
+  }
+  const body = await resp.json();
+  return recordsFromValues(tab, body.values || []);
+}
+
+function recordsFromValues(tab, rows){
+  if (!rows.length) return [];
+  // cabeçalho = primeira linha que contém "ROTEIRO" (robusto a título mesclado acima)
+  let hIdx = rows.findIndex(r => r.some(v => String(v||'').trim().toUpperCase() === 'ROTEIRO'));
+  if (hIdx === -1) hIdx = 0;
+  const header = rows[hIdx].map(v => String(v||'').trim());
+  let iData = findCol(header, 'DATA'); if (iData === -1) iData = 0;
+  let iRoteiro = findCol(header, 'ROTEIRO'); if (iRoteiro === -1) iRoteiro = 1;
+  const iChegada = findCol(header, 'CHEGADA BYD');
+  const iStatus = findCol(header, 'STATUS');
+  const iMotorista = findCol(header, 'MOTORISTA');
+  const iVeiculo = findCol(header, 'VEÍCULO', 'VEICULO');
+  const iCarro = findCol(header, 'CARRO');
+  const iMotivo = findCol(header, 'MOTIVO DO ATRASO');
+  const iOperadora = findCol(header, 'OPERADORA');
+  const cell = (row, idx) => (idx !== -1 && row[idx] !== undefined && row[idx] !== null) ? String(row[idx]).trim() : '';
+  const out = [];
+  for (let r = hIdx + 1; r < rows.length; r++){
+    const row = rows[r];
+    const dataRaw = cell(row, iData), roteiroFull = cell(row, iRoteiro);
+    if (!dataRaw || !roteiroFull) continue;
+    const dISO = parseDateBR(dataRaw);
+    if (!dISO) continue;
+    const dashIdx = roteiroFull.indexOf(' - ');
+    const chegada = cell(row, iChegada), status = cell(row, iStatus);
+    out.push({
+      d: dISO,
+      c: dashIdx !== -1 ? roteiroFull.slice(0, dashIdx).trim() : roteiroFull,
+      ds: dashIdx !== -1 ? roteiroFull.slice(dashIdx + 3).trim() : '',
+      t: tab.turno, grp: tab.grupo,
+      h: chegada ? parseTimeHM(chegada) : null,
+      s: status ? normalizeStatus(status) : null,
+      m: cell(row, iMotorista) || null,
+      v: cell(row, iVeiculo) || null,
+      car: cell(row, iCarro) || null,
+      mo: cell(row, iMotivo) || null,
+      op: cell(row, iOperadora) || null,
+    });
+  }
+  return out;
+}
+
+// ---------- LEITURA PELO SCRIPT DA PLANILHA (Apps Script) ----------
+// O script lê as abas com getDisplayValues(): todas as linhas (mesmo com filtro
+// ativo) e o texto exatamente como aparece na tela. JSONP evita bloqueio de CORS.
+function jsonpScript(url, timeoutMs){
+  return new Promise((resolve, reject) => {
+    const cb = '__asCb_' + Math.random().toString(36).slice(2) + Date.now();
+    const sc = document.createElement('script');
+    let done = false;
+    const timer = setTimeout(() => { if (done) return; done = true; cleanup(); reject(new Error('tempo esgotado')); }, timeoutMs || 45000);
+    function cleanup(){ clearTimeout(timer); delete window[cb]; if (sc.parentNode) sc.parentNode.removeChild(sc); }
+    window[cb] = (d) => { if (done) return; done = true; cleanup(); resolve(d); };
+    sc.onerror = () => { if (done) return; done = true; cleanup(); reject(new Error('não foi possível carregar o script (verifique a implantação: acesso "Qualquer pessoa")')); };
+    sc.src = url + (url.indexOf('?') !== -1 ? '&' : '?') + 'callback=' + cb;
+    document.head.appendChild(sc);
+  });
+}
+async function fetchTabRecordsAS(tab){
+  const d = await jsonpScript(APPS_SCRIPT_URL + '?tab=' + encodeURIComponent(tab.name));
+  if (!d || !d.ok) throw new Error((d && d.error) || 'resposta inválida');
+  return recordsFromValues(tab, d.values || []);
+}
+
 async function loadAllRecords(){
-  const results = await Promise.all(SHEET_TABS.map(tab => fetchTabRecords(tab)));
-  return results.flat();
+  const run = (sid) => Promise.all(SHEET_TABS.map(async tab => {
+    if (AS_URL_OK()){
+      try { const r = await fetchTabRecordsAS(tab); DIAG.asTabs++; return r; }
+      catch(e){ console.warn('Script falhou em', tab.name, e); DIAG.asFail.push(tab.name + ': ' + e.message); }
+    }
+    if (API_KEY_OK()){
+      try { const r = await fetchTabRecordsV4(tab); DIAG.apiTabs++; return r; }
+      catch(e){ console.warn('API falhou em', tab.name, e); DIAG.apiFail.push(tab.name + ': ' + e.message); }
+    }
+    return fetchTabRecords(tab, sid); // leitura padrão do Google
+  }));
+  let res = [];
+  try { res = (await run(SPREADSHEET_ID)).flat(); DIAG.src = 'espelho'; }
+  catch(e){ console.warn('Espelho falhou', e); DIAG.srcErr = e.message; res = []; }
+  // reserva: se o espelho estiver inacessível ou vazio (ex.: fórmula sem autorização), usa a base original
+  if (!res.length && SPREADSHEET_ID_ORIG !== SPREADSHEET_ID){
+    if (!DIAG.srcErr) DIAG.srcErr = 'sem dados';
+    resetDiag();
+    res = (await run(SPREADSHEET_ID_ORIG)).flat();
+    DIAG.src = 'base original (reserva)';
+  }
+  const antes = res.length;
+  res = res.filter(r => r.d >= DATA_MINIMA);
+  DIAG.cortadas = antes - res.length;
+  return res;
 }
 
 // Checagem OPCIONAL e leve: usa a Sheets API só para saber se há um Filtro
@@ -1875,7 +2002,7 @@ function hideLoadStatus(){
     setLastUpdateBadge();
     renderDiag();
     await boot();
-    checkActiveFilters(); // não-bloqueante; silencioso se a chave não estiver configurada
+    if (!DIAG.apiTabs && !DIAG.asTabs) checkActiveFilters(); // com script/API, filtros da planilha não afetam os dados
   } catch (err) {
     console.error('Erro ao carregar dados da planilha:', err);
     showLoadStatus('Não foi possível carregar os dados da planilha automaticamente. Verifique se ela está compartilhada como "Qualquer pessoa com o link pode visualizar", ou tente recarregar a página. Detalhe técnico: ' + err.message, true);
