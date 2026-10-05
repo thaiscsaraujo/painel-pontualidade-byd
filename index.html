@@ -720,14 +720,26 @@ async function fetchTabRecords(tab){
   // headers=0 (que misturava a linha de cabeçalho nos dados e confundia
   // a detecção de tipo da coluna de horário).
   const headerRows = tab.headerRows || 1;
-  const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?sheet=${encodeURIComponent(tabName)}&headers=${headerRows}`;
-  const data = await jsonpFetchTable(url);
+  const baseUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?sheet=${encodeURIComponent(tabName)}`;
+  // Duas leituras da mesma aba:
+  //  1) "tipada" (headers=N): o Google formata corretamente colunas de hora/data,
+  //     mas em colunas de tipo misto (ex.: CARRO, com 8254 e M-0880 juntos) ele
+  //     devolve VAZIO para as células que não combinam com o tipo dominante.
+  //  2) "bruta" (headers=0): tudo vem como texto, então não perde valores como
+  //     M-0880 / F-0210 / 058IBS. Usada apenas para completar campos de texto.
+  const [data, dataRaw] = await Promise.all([
+    jsonpFetchTable(`${baseUrl}&headers=${headerRows}`),
+    jsonpFetchTable(`${baseUrl}&headers=0`).catch(() => null),
+  ]);
   if (!data || data.status === 'error'){
     const msg = (data && data.errors && data.errors[0] && data.errors[0].detailed_message) || 'erro desconhecido ao ler a aba';
     throw new Error('Aba "' + tabName + '": ' + msg);
   }
   const table = data.table;
   if (!table || !table.cols || !table.rows) return [];
+  const rawRows = (dataRaw && dataRaw.status !== 'error' && dataRaw.table && dataRaw.table.rows)
+    ? dataRaw.table.rows.map(r => (r.c || []).map(cellValue))
+    : null;
 
   const header = table.cols.map(c => (c.label || '').trim());
 
@@ -744,7 +756,7 @@ async function fetchTabRecords(tab){
   const iOperadora = findCol(header, 'OPERADORA');
 
   const out = [];
-  table.rows.forEach(row => {
+  table.rows.forEach((row, rowIdx) => {
     const cells = row.c || [];
     const dataRaw = iData !== -1 ? cellValue(cells[iData]) : null;
     const roteiroRaw = iRoteiro !== -1 ? cellValue(cells[iRoteiro]) : null;
@@ -759,11 +771,22 @@ async function fetchTabRecords(tab){
 
     const chegadaVal = iChegada !== -1 ? cellValue(cells[iChegada]) : null;
     const statusVal = iStatus !== -1 ? cellValue(cells[iStatus]) : null;
-    const motoristaVal = iMotorista !== -1 ? cellValue(cells[iMotorista]).trim() : '';
-    const veiculoVal = iVeiculo !== -1 ? cellValue(cells[iVeiculo]).trim() : '';
-    const carroVal = iCarro !== -1 ? cellValue(cells[iCarro]).trim() : '';
-    const motivoVal = iMotivo !== -1 ? cellValue(cells[iMotivo]).trim() : '';
-    const operadoraVal = iOperadora !== -1 ? cellValue(cells[iOperadora]).trim() : '';
+    // linha correspondente na leitura bruta (offset = nº de linhas de cabeçalho);
+    // só é usada se for comprovadamente a mesma linha (mesmo roteiro).
+    const rawRow = rawRows ? rawRows[rowIdx + headerRows] : null;
+    const sameRow = rawRow && (rawRow[iRoteiro] || '').trim() === roteiroFull;
+    const textVal = (idx) => {
+      if (idx === -1) return '';
+      const typed = cellValue(cells[idx]).trim();
+      if (typed) return typed;
+      return sameRow ? (rawRow[idx] || '').trim() : '';
+    };
+
+    const motoristaVal = textVal(iMotorista);
+    const veiculoVal = textVal(iVeiculo);
+    const carroVal = textVal(iCarro);
+    const motivoVal = textVal(iMotivo);
+    const operadoraVal = textVal(iOperadora);
 
     out.push({
       d: dISO,
