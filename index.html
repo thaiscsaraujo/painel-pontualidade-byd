@@ -563,6 +563,7 @@
   <footer>
     <span>Painel de Pontualidade · BYD Camaçari — Univale CSC</span>
     <span>Fonte: Controle de Chegada do Mês — planilha operacional · Gerado a partir dos dados brutos</span>
+    <span id="diagInfo" style="display:block;margin-top:6px;font-size:11px;color:var(--ink-500);opacity:.8;"></span>
   </footer>
 </div>
 
@@ -710,6 +711,17 @@ function cellValue(cell){
   return String(cell.v);
 }
 
+const BUILD_ID = 'v-carro-2';
+const DIAG = { tabs:0, rawOk:0, rawFail:[], filled:0, unmatched:0 };
+function renderDiag(){
+  const el = document.getElementById('diagInfo');
+  if (!el) return;
+  let txt = BUILD_ID + ' · leitura complementar de texto: ' + DIAG.rawOk + '/' + DIAG.tabs + ' abas · campos recuperados: ' + DIAG.filled;
+  if (DIAG.rawFail.length) txt += ' · FALHOU em: ' + DIAG.rawFail.join(', ');
+  if (DIAG.unmatched) txt += ' · linhas sem correspondência: ' + DIAG.unmatched;
+  el.textContent = txt;
+}
+
 async function fetchTabRecords(tab){
   const tabName = tab.name;
   // headers=N diz ao Google exatamente quantas linhas são de cabeçalho, por
@@ -729,7 +741,7 @@ async function fetchTabRecords(tab){
   //     M-0880 / F-0210 / 058IBS. Usada apenas para completar campos de texto.
   const [data, dataRaw] = await Promise.all([
     jsonpFetchTable(`${baseUrl}&headers=${headerRows}`),
-    jsonpFetchTable(`${baseUrl}&headers=0`).catch(() => null),
+    jsonpFetchTable(`${baseUrl}&headers=0`).catch((e) => { console.warn('Leitura bruta falhou em', tabName, e); return null; }),
   ]);
   if (!data || data.status === 'error'){
     const msg = (data && data.errors && data.errors[0] && data.errors[0].detailed_message) || 'erro desconhecido ao ler a aba';
@@ -740,6 +752,8 @@ async function fetchTabRecords(tab){
   const rawRows = (dataRaw && dataRaw.status !== 'error' && dataRaw.table && dataRaw.table.rows)
     ? dataRaw.table.rows.map(r => (r.c || []).map(cellValue))
     : null;
+  DIAG.tabs++;
+  if (rawRows) DIAG.rawOk++; else DIAG.rawFail.push(tabName);
 
   const header = table.cols.map(c => (c.label || '').trim());
 
@@ -755,9 +769,28 @@ async function fetchTabRecords(tab){
   const iMotivo = findCol(header, 'MOTIVO DO ATRASO');
   const iOperadora = findCol(header, 'OPERADORA');
 
+  // Casa cada linha "tipada" com a sua linha "bruta" por uma chave de campos de
+  // texto (roteiro|motorista|status), consumindo em ordem — assim não depende de
+  // as duas leituras terem exatamente o mesmo deslocamento de linhas.
+  const keyOf = (r) => [(r[iRoteiro]||'').trim(), (r[iMotorista]||'').trim(), (r[iStatus]||'').trim()].join('|');
+  const rawQueues = new Map();
+  if (rawRows){
+    rawRows.forEach((rr, i) => {
+      if (i < headerRows) return;
+      const k = keyOf(rr);
+      if (!rawQueues.has(k)) rawQueues.set(k, []);
+      rawQueues.get(k).push(rr);
+    });
+  }
+
   const out = [];
-  table.rows.forEach((row, rowIdx) => {
+  table.rows.forEach((row) => {
     const cells = row.c || [];
+    // consome a linha bruta correspondente ANTES de qualquer descarte, para manter a fila alinhada
+    const typedKey = [cellValue(cells[iRoteiro]).trim(), iMotorista !== -1 ? cellValue(cells[iMotorista]).trim() : '', iStatus !== -1 ? cellValue(cells[iStatus]).trim() : ''].join('|');
+    const q = rawRows ? rawQueues.get(typedKey) : null;
+    const rawRow = (q && q.length) ? q.shift() : null;
+    if (rawRows && !rawRow && cellValue(cells[iRoteiro]).trim()) DIAG.unmatched++;
     const dataRaw = iData !== -1 ? cellValue(cells[iData]) : null;
     const roteiroRaw = iRoteiro !== -1 ? cellValue(cells[iRoteiro]) : null;
     if (!dataRaw || !roteiroRaw) return;
@@ -771,15 +804,13 @@ async function fetchTabRecords(tab){
 
     const chegadaVal = iChegada !== -1 ? cellValue(cells[iChegada]) : null;
     const statusVal = iStatus !== -1 ? cellValue(cells[iStatus]) : null;
-    // linha correspondente na leitura bruta (offset = nº de linhas de cabeçalho);
-    // só é usada se for comprovadamente a mesma linha (mesmo roteiro).
-    const rawRow = rawRows ? rawRows[rowIdx + headerRows] : null;
-    const sameRow = rawRow && (rawRow[iRoteiro] || '').trim() === roteiroFull;
     const textVal = (idx) => {
       if (idx === -1) return '';
       const typed = cellValue(cells[idx]).trim();
       if (typed) return typed;
-      return sameRow ? (rawRow[idx] || '').trim() : '';
+      const fromRaw = rawRow ? (rawRow[idx] || '').trim() : '';
+      if (fromRaw) DIAG.filled++;
+      return fromRaw;
     };
 
     const motoristaVal = textVal(iMotorista);
@@ -1842,6 +1873,7 @@ function hideLoadStatus(){
     if (!RECORDS.length) throw new Error('Nenhum registro encontrado nas abas consultadas.');
     hideLoadStatus();
     setLastUpdateBadge();
+    renderDiag();
     await boot();
     checkActiveFilters(); // não-bloqueante; silencioso se a chave não estiver configurada
   } catch (err) {
